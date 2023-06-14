@@ -608,7 +608,6 @@ class DictWidget(Widget):
 
     def display(self):
         super(DictWidget, self).display()
-
         if not self.field:
             return
 
