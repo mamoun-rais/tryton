@@ -173,6 +173,8 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
 
         idx = 0
         count = len(modules)
+        # JCA : Delay cache clears
+        caches_to_clear = []
         for node in graph:
             module = node.name
             if module not in MODULES:
@@ -262,6 +264,8 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
             Model.clean()
             ModelField = pool.get('ir.model.field')
             ModelField.clean()
+            Cache._reset[transaction] = set(
+                caches_to_clear + list(Cache._reset.get(transaction, [])))
 
         # JCA: Add update parameter to post init hooks
         pool.post_init(None)
