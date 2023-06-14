@@ -3522,8 +3522,10 @@ function eval_pyson(value){
                 'tabindex': -1,
                 'aria-label': Sao.i18n.gettext("Switch"),
                 'title': Sao.i18n.gettext("Switch"),
-            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-switch')
-            ).appendTo(buttons);
+            }).append(jQuery('<span/>', {
+                // Coog Override Icon
+                'class': 'glyphicon glyphicon-resize-full'
+            })).appendTo(buttons);
             this.but_switch.click(disable_during(this.switch_.bind(this)));
 
             this.but_previous = jQuery('<button/>', {
@@ -3580,8 +3582,10 @@ function eval_pyson(value){
                     'tabindex': -1,
                     'aria-label': Sao.i18n.gettext("Add"),
                     'title': Sao.i18n.gettext("Add"),
-                }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-add')
-                ).appendTo(buttons);
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-search'
+                })).appendTo(buttons);
                 this.but_add.click(disable_during(this.add.bind(this)));
 
                 this.but_remove = jQuery('<button/>', {
@@ -3590,8 +3594,10 @@ function eval_pyson(value){
                     'tabindex': -1,
                     'aria-label': Sao.i18n.gettext("Remove"),
                     'title': Sao.i18n.gettext("Remove"),
-                }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-remove')
-                ).appendTo(buttons);
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-remove'
+                })).appendTo(buttons);
                 this.but_remove.click(disable_during(this.remove.bind(this)));
             }
 
@@ -3602,7 +3608,8 @@ function eval_pyson(value){
                 'aria-label': Sao.i18n.gettext("New"),
                 'title': Sao.i18n.gettext("New"),
             }).append(jQuery('<span/>', {
-                'class': 'glyphicon glyphicon-pencil'
+                // Coog Override Icon
+                'class': 'glyphicon glyphicon-plus'
             })).appendTo(buttons);
             this.but_new.click(disable_during(() => this.new_()));
 
@@ -3612,8 +3619,10 @@ function eval_pyson(value){
                 'tabindex': -1,
                 'aria-label': Sao.i18n.gettext("Open"),
                 'title': Sao.i18n.gettext("Open"),
-            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-open')
-            ).appendTo(buttons);
+            }).append(jQuery('<span/>', {
+                // Coog Override Icon
+                'class': 'glyphicon glyphicon-pencil'
+            })).appendTo(buttons);
             this.but_open.click(disable_during(this.open.bind(this)));
 
             this.but_del = jQuery('<button/>', {
@@ -4433,8 +4442,10 @@ function eval_pyson(value){
                 'tabindex': -1,
                 'aria-label': Sao.i18n.gettext("Add"),
                 'title': Sao.i18n.gettext("Add"),
-            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-add')
-            ).appendTo(buttons);
+            }).append(jQuery('<span/>', {
+                // Coog Override Icon
+                'class': 'glyphicon glyphicon-search'
+            })).appendTo(buttons);
             this.but_add.click(this.add.bind(this));
 
             this.label = jQuery('<span/>', {
@@ -4450,8 +4461,10 @@ function eval_pyson(value){
                 'tabindex': -1,
                 'aria-label': Sao.i18n.gettext("Remove"),
                 'title': Sao.i18n.gettext("Remove"),
-            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-remove')
-            ).appendTo(buttons);
+            }).append(jQuery('<span/>', {
+                // Coog Override Icon
+                'class': 'glyphicon glyphicon-remove'
+            })).appendTo(buttons);
             this.but_remove.click(this.remove.bind(this));
 
             // [Coog specific]
@@ -4801,8 +4814,10 @@ function eval_pyson(value){
                 'type': 'button',
                 'aria-label': Sao.i18n.gettext("Clear"),
                 'title': Sao.i18n.gettext("Clear"),
-            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-clear')
-            ).appendTo(group);
+            }).append(jQuery('<span/>', {
+                // Coog Override Icon
+                'class': 'glyphicon glyphicon-trash'
+            })).appendTo(group);
             this.but_clear.click(this.clear.bind(this));
 
             return group;
@@ -4936,8 +4951,10 @@ function eval_pyson(value){
                     'type': 'button',
                     'aria-label': Sao.i18n.gettext("Open..."),
                     'title': Sao.i18n.gettext("Open..."),
-                }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-open')
-                ).appendTo(jQuery('<span/>', {
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-pencil'
+                })).appendTo(jQuery('<span/>', {
                     'class': 'input-group-btn',
                 }).prependTo(group));
                 this.but_open.click(this.open.bind(this));
