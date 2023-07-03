@@ -7,6 +7,7 @@ import sys
 from argparse import ArgumentParser
 
 import pycountry
+from forex_python.converter import CurrencyCodes
 
 try:
     from progressbar import ProgressBar, Bar, ETA, SimpleProgress
@@ -52,6 +53,7 @@ def get_currencies():
 def update_currencies(currencies):
     print("Update currencies", file=sys.stderr)
     Currency = Model.get('currency.currency')
+    codes = CurrencyCodes()
 
     records = []
     for currency in _progress(pycountry.currencies):
@@ -59,11 +61,10 @@ def update_currencies(currencies):
         if code in currencies:
             record = currencies[code]
         else:
-            record = Currency(code=code, symbol=None)
+            record = Currency(code=code)
         record.name = _remove_forbidden_chars(currency.name)
         record.numeric_code = currency.numeric
-        if not record.symbol:
-            record.symbol = currency.alpha_3
+        record.symbol = codes.get_symbol(currency.alpha_3) or currency.alpha_3
         records.append(record)
 
     Currency.save(records)
