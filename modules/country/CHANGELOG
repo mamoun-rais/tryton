@@ -1,5 +1,4 @@
-Version 6.0.3 - 2022-10-17
-* Bug fixes (see mercurial logs for details)
+* Manage unknown subdivision type
 
 Version 6.0.2 - 2022-02-01
 * Bug fixes (see mercurial logs for details)
@@ -21,6 +20,7 @@ Version 5.6.0 - 2020-05-04
 
 Version 5.4.0 - 2019-11-04
 * Bug fixes (see mercurial logs for details)
+
 * Replace XML data by import script
 
 Version 5.2.0 - 2019-05-06

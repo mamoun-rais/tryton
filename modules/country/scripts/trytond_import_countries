@@ -36,21 +36,15 @@ def _get_language_codes():
         yield l.code
 
 
-def _remove_forbidden_chars(name):
-    from trytond.model.fields import Char
-    for c in Char.forbidden_chars:
-        if c in name:
-            name.replace(c, ' ')
-    return name.strip()
-
-
 def get_countries():
     Country = Model.get('country.country')
-    return {c.code: c for c in Country.find([])}
+
+    with config.get_config().set_context(active_test=False):
+        return {c.code: c for c in Country.find([])}
 
 
 def update_countries(countries):
-    print("Update countries", file=sys.stderr)
+    print("Update countries")
     Country = Model.get('country.country')
 
     records = []
@@ -60,7 +54,7 @@ def update_countries(countries):
             record = countries[code]
         else:
             record = Country(code=code)
-        record.name = _remove_forbidden_chars(country.name)
+        record.name = country.name
         record.code3 = country.alpha_3
         record.code_numeric = country.numeric
         records.append(record)
@@ -79,28 +73,27 @@ def translate_countries(countries):
                 'iso3166', pycountry.LOCALES_DIR, languages=[code])
         except IOError:
             continue
-        print("Update countries %s" % code, file=sys.stderr)
+        print("Update countries %s" % code)
         with current_config.set_context(language=code):
             records = []
             for country in _progress(pycountry.countries):
                 record = Country(countries[country.alpha_2].id)
-                record.name = _remove_forbidden_chars(
-                    gnutranslation.gettext(country.name))
+                record.name = gnutranslation.gettext(country.name)
                 records.append(record)
             Country.save(records)
 
 
 def get_subdivisions():
     Subdivision = Model.get('country.subdivision')
-    return {(s.country.code, s.code): s for s in Subdivision.find([])}
+
+    with config.get_config().set_context(active_test=False):
+        return {(s.country.code, s.code): s for s in Subdivision.find([])}
 
 
 def update_subdivisions(countries, subdivisions):
-    print("Update subdivisions", file=sys.stderr)
+    print("Update subdivisions")
     Subdivision = Model.get('country.subdivision')
 
-    types = dict(Subdivision._fields['type']['selection'])
-    unknown_types = set()
     records = []
     for subdivision in _progress(pycountry.subdivisions):
         code = subdivision.code
@@ -109,17 +102,8 @@ def update_subdivisions(countries, subdivisions):
             record = subdivisions[(country_code, code)]
         else:
             record = Subdivision(code=code, country=countries[country_code])
-        record.name = _remove_forbidden_chars(subdivision.name)
-        type_ = subdivision.type.lower()
-        if type_ in types:
-            record.type = subdivision.type.lower()
-        else:
-            record.type = None
-            if type_ not in unknown_types:
-                print(
-                    "Unknown subdivision type: %s" % subdivision.type,
-                    file=sys.stderr)
-                unknown_types.add(type_)
+        record.name = subdivision.name
+        record.type = subdivision.type.lower()
         records.append(record)
 
     Subdivision.save(records)
@@ -127,7 +111,7 @@ def update_subdivisions(countries, subdivisions):
 
 
 def update_subdivisions_parent(subdivisions):
-    print("Update subdivisions parent", file=sys.stderr)
+    print("Update subdivisions parent")
     Subdivision = Model.get('country.subdivision')
 
     records = []
@@ -135,9 +119,9 @@ def update_subdivisions_parent(subdivisions):
         code = subdivision.code
         country_code = subdivision.country_code
         record = subdivisions[(country_code, code)]
-        if subdivision.parent:
+        if subdivision.parent_code:
             record.parent = subdivisions[
-                (country_code, subdivision.parent.code)]
+                (country_code, subdivision.parent_code)]
         else:
             record.parent = None
         records.append(record)
@@ -154,25 +138,20 @@ def translate_subdivisions(subdivisions):
                 'iso3166-2', pycountry.LOCALES_DIR, languages=[code])
         except IOError:
             continue
-        print("Update subdivisions %s" % code, file=sys.stderr)
+        print("Update subdivisions %s" % code)
         with current_config.set_context(language=code):
             records = []
             for subdivision in _progress(pycountry.subdivisions):
                 record = Subdivision(subdivisions[
                         (subdivision.country_code, subdivision.code)].id)
-                record.name = _remove_forbidden_chars(
-                    gnutranslation.gettext(subdivision.name))
+                record.name = gnutranslation.gettext(subdivision.name)
                 records.append(record)
             Subdivision.save(records)
 
 
 def main(database, config_file=None):
     config.set_trytond(database, config_file=config_file)
-    with config.get_config().set_context(active_test=False):
-        do_import()
 
-
-def do_import():
     countries = get_countries()
     countries = update_countries(countries)
     translate_countries(countries)
@@ -182,15 +161,13 @@ def do_import():
     translate_subdivisions(subdivisions)
 
 
-def run():
+if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('-d', '--database', dest='database', required=True)
+    parser.add_argument('-d', '--database', dest='database')
     parser.add_argument('-c', '--config', dest='config_file',
         help='the trytond config file')
 
     args = parser.parse_args()
+    if not args.database:
+        parser.error('Missing database')
     main(args.database, args.config_file)
-
-
-if __name__ == '__main__':
-    run()

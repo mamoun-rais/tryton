@@ -51,14 +51,10 @@ class Country(DeactivableMixin, ModelSQL, ModelView):
 
     @classmethod
     def search_rec_name(cls, name, clause):
-        if clause[1].startswith('!') or clause[1].startswith('not '):
-            bool_op = 'AND'
-        else:
-            bool_op = 'OR'
         code_value = clause[2]
         if clause[1].endswith('like'):
             code_value = lstrip_wildcard(clause[2])
-        return [bool_op,
+        return ['OR',
             ('name',) + tuple(clause[1:]),
             ('code', clause[1], code_value) + tuple(clause[3:]),
             ('code3', clause[1], code_value) + tuple(clause[3:]),
@@ -98,6 +94,7 @@ class Subdivision(DeactivableMixin, ModelSQL, ModelView):
     code = fields.Char('Code', required=True, select=True,
         help="The ISO code of the subdivision.")
     type = fields.Selection([
+        (None, ""),
         ('administration', 'Administration'),
         ('administrative area', 'Administrative area'),
         ('administrative atoll', 'Administrative atoll'),
@@ -202,7 +199,7 @@ class Subdivision(DeactivableMixin, ModelSQL, ModelView):
         ('unitary authority (england)', 'Unitary authority (england)'),
         ('unitary authority (wales)', 'Unitary authority (wales)'),
         ('zone', 'zone'),
-        ], 'Type', required=True)
+        ], "Type")
     parent = fields.Many2One('country.subdivision', 'Parent',
         domain=[
             ('country', '=', Eval('country', -1)),
@@ -224,22 +221,20 @@ class Subdivision(DeactivableMixin, ModelSQL, ModelView):
 
         super().__register__(module_name)
 
+        table_h = cls.__table_handler__(module_name)
+
         # Migration from 5.2: remove country data
         cursor.execute(*data.delete(where=(data.module == 'country')
                 & (data.model == cls.__name__)))
 
+        # Migration from 6.2: remove type required
+        table_h.not_null_action('type', action='remove')
+
     @classmethod
     def search_rec_name(cls, name, clause):
-        if clause[1].startswith('!') or clause[1].startswith('not '):
-            bool_op = 'AND'
-        else:
-            bool_op = 'OR'
-        code_value = clause[2]
-        if clause[1].endswith('like'):
-            code_value = lstrip_wildcard(clause[2])
-        return [bool_op,
+        return ['OR',
             ('name',) + tuple(clause[1:]),
-            ('code', clause[1], code_value) + tuple(clause[3:]),
+            ('code',) + tuple(clause[1:]),
             ]
 
     @classmethod
@@ -304,10 +299,7 @@ class PostalCode(ModelSQL, ModelView):
             bool_op = 'AND'
         else:
             bool_op = 'OR'
-        code_value = clause[2]
-        if clause[1].endswith('like'):
-            code_value = lstrip_wildcard(clause[2])
         return [bool_op,
-            ('postal_code', clause[1], code_value) + tuple(clause[3:]),
+            ('postal_code',) + tuple(clause[1:]),
             ('city',) + tuple(clause[1:]),
             ]
