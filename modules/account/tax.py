@@ -2,8 +2,8 @@
 # this repository contains the full copyright notices and license terms.
 import datetime
 from collections import namedtuple
-from decimal import Decimal
-from itertools import groupby
+from decimal import Decimal, ROUND_HALF_EVEN
+from itertools import cycle, groupby
 
 from sql import Literal
 from sql.aggregate import Sum
@@ -987,10 +987,9 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             if not (start_date <= date <= end_date):
                 continue
 
-            if tax.type == 'percentage':
-                rate += tax.rate
-            elif tax.type == 'fixed':
-                amount += tax.amount
+            tax_rate, tax_amount = tax._reverse_rate_amount_from_type()
+            rate += tax_rate
+            amount += tax_amount
 
             if tax.childs:
                 child_rate, child_amount = cls._reverse_rate_amount(
@@ -998,6 +997,14 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
                 rate += child_rate
                 amount += child_amount
         return rate, amount
+
+    def _reverse_rate_amount_from_type(self):
+        # Use another method to allow override for custom tax types
+        if self.type == 'percentage':
+            return self.rate, 0
+        elif self.type == 'fixed':
+            return 0, self.amount
+        return 0, 0
 
     @classmethod
     def _reverse_unit_compute(cls, price_unit, taxes, date):
@@ -1206,8 +1213,25 @@ class TaxableMixin(object):
     def _round_taxes(self, taxes):
         if not self.currency:
             return
+
+        residual_amount = 0
         for taxline in taxes.values():
-            taxline['amount'] = self.currency.round(taxline['amount'])
+            rounded_amount = self.currency.round(taxline['amount'])
+            residual_amount += rounded_amount - taxline['amount']
+            taxline['amount'] = rounded_amount
+
+        residual_amount = self.currency.round(
+            residual_amount, rounding=ROUND_HALF_EVEN)
+        if abs(residual_amount) >= self.currency.rounding:
+            offset_amount = self.currency.rounding
+            if residual_amount < 0:
+                offset_amount *= -1
+
+            for tax in cycle(taxes.values()):
+                tax['amount'] -= offset_amount
+                residual_amount -= offset_amount
+                if abs(residual_amount) < self.currency.rounding:
+                    break
 
     @fields.depends(methods=['_get_tax_context', '_round_taxes'])
     def _get_taxes(self):
@@ -1222,10 +1246,15 @@ class TaxableMixin(object):
             taxable_lines = [_TaxableLine(*params)
                 for params in self.taxable_lines]
             for line in taxable_lines:
+                date = getattr(line, 'tax_date',
+                    getattr(self, 'tax_date',
+                        pool.get('ir.date').today()))
                 l_taxes = Tax.compute(Tax.browse(line.taxes), line.unit_price,
-                    line.quantity, line.tax_date or self.tax_date)
+                    line.quantity, date)
+                taxes_to_round = []
                 for tax in l_taxes:
                     taxline = self._compute_tax_line(**tax)
+                    taxes_to_round.append(taxline)
                     # Base must always be rounded per line as there will be one
                     # tax line per taxable_lines
                     if self.currency:
@@ -1236,7 +1265,7 @@ class TaxableMixin(object):
                         taxes[taxline]['base'] += taxline['base']
                         taxes[taxline]['amount'] += taxline['amount']
                 if tax_rounding == 'line':
-                    self._round_taxes(taxes)
+                    self._round_taxes({tl: taxes[tl] for tl in taxes_to_round})
         if tax_rounding == 'document':
             self._round_taxes(taxes)
         return taxes
