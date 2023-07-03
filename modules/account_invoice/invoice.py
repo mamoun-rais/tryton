@@ -503,8 +503,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             if tax.manual:
                 self.tax_amount += tax.amount or Decimal('0.0')
                 continue
-            tax_id = tax.tax.id if tax.tax else None
-            key = (tax.account.id, tax_id)
+            key = tax._key
             if (key not in computed_taxes) or (key in tax_keys):
                 taxes.remove(tax)
                 continue
@@ -589,7 +588,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
                     ).select(invoice.id,
                     Coalesce(Sum(
                             Case((line.second_currency == invoice.currency,
-                                    line.amount_second_currency),
+                                line.amount_second_currency),
                                 else_=line.debit - line.credit)),
                         0).cast(type_name),
                     where=(invoice.account == line.account) & red_sql,
@@ -860,8 +859,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
                 for tax in invoice.taxes:
                     if tax.manual:
                         continue
-                    tax_id = tax.tax.id if tax.tax else None
-                    key = (tax.account.id, tax_id)
+                    key = tax._key
                     if (key not in computed_taxes) or (key in tax_keys):
                         to_delete.append(tax)
                         continue
@@ -914,6 +912,9 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         line.description = self.description
         return line
 
+    def get_payment_term_computation_date(self):
+        return self.invoice_date
+
     def get_move(self):
         '''
         Compute account move for the invoice and return the created move
@@ -942,7 +943,8 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         term_lines = [(Date.today(), total)]
         if self.payment_term:
             term_lines = self.payment_term.compute(
-                total, self.company.currency, self.invoice_date)
+                total, self.company.currency,
+                self.get_payment_term_computation_date())
         remainder_total_currency = total_currency
         for date, amount in term_lines:
             line = self._get_move_line(date, amount)
@@ -1013,7 +1015,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         pattern.setdefault('fiscalyear', fiscalyear.id)
         pattern.setdefault('period', period.id)
         invoice_type = self.type
-        if (all(l.amount <= 0 for l in self.lines if l.product)
+        if (all(l.amount < 0 for l in self.lines if l.product)
                 and self.total_amount < 0):
             invoice_type += '_credit_note'
         else:
@@ -1456,7 +1458,11 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             to_reconcile = []
             for line in invoice.move.lines + invoice.cancel_move.lines:
                 if line.account == invoice.account:
-                    to_reconcile.append(line)
+                    # JMO : handle case of zero lines
+                    # on cancel move
+                    zero_reconciled = not line.amount and line.reconciliation
+                    if not zero_reconciled:
+                        to_reconcile.append(line)
             Line.reconcile(to_reconcile)
 
         cls._clean_payments(invoices)
@@ -1848,8 +1854,7 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
         for tax in self.invoice.taxes:
             if tax.manual:
                 continue
-            tax_id = tax.tax.id if tax.tax else None
-            key = (tax.account.id, tax_id)
+            key = tax._key
             if key in taxes_keys:
                 taxes.append(tax.id)
         return taxes
@@ -2236,12 +2241,6 @@ class InvoiceTax(sequence_ordered(), ModelSQL, ModelView):
     def default_manual():
         return True
 
-    @classmethod
-    def default_invoice_state(cls):
-        pool = Pool()
-        Invoice = pool.get('account.invoice')
-        return Invoice.default_state()
-
     @fields.depends('invoice', '_parent_invoice.state')
     def on_change_with_invoice_state(self, name=None):
         if self.invoice:
@@ -2279,6 +2278,15 @@ class InvoiceTax(sequence_ordered(), ModelSQL, ModelView):
                         amount = self.invoice.currency.round(amount)
                     return amount
         return self.amount
+
+    @property
+    def _key(self):
+        # JMO : backport fix for https://bugs.tryton.org/issue8759
+        # To be able to fix https://support.coopengo.com/issues/11322
+
+        # Same as _TaxKey
+        tax_id = self.tax.id if self.tax else -1
+        return (self.account.id, tax_id, self.base >= 0)
 
     @classmethod
     def check_modify(cls, taxes):
@@ -2487,7 +2495,7 @@ class PayInvoiceStart(ModelView):
     invoice_account = fields.Many2One(
         'account.account', "Invoice Account", readonly=True)
     payment_method = fields.Many2One(
-        'account.invoice.payment.method', "Payment Method",  required=True,
+        'account.invoice.payment.method', "Payment Method", required=True,
         domain=[
             ('company', '=', Eval('company')),
             ('debit_account', '!=', Eval('invoice_account')),
@@ -2719,8 +2727,7 @@ class PayInvoice(Wizard):
             amount_second_currency = self.start.amount
             second_currency = self.start.currency
 
-        if (0 <= invoice.amount_to_pay < amount_invoice
-                or amount_invoice < invoice.amount_to_pay <= 0
+        if (amount_invoice > invoice.amount_to_pay
                 and self.ask.type != 'writeoff'):
             lang = Lang.get()
             raise PayInvoiceError(

@@ -1,15 +1,3 @@
-Version 5.2.6 - 2020-04-04
-* Bug fixes (see mercurial logs for details)
-
-Version 5.2.5 - 2020-02-02
-* Bug fixes (see mercurial logs for details)
-
-Version 5.2.4 - 2020-01-09
-* Bug fixes (see mercurial logs for details)
-
-Version 5.2.3 - 2019-12-02
-* Bug fixes (see mercurial logs for details)
-
 Version 5.2.2 - 2019-08-17
 * Bug fixes (see mercurial logs for details)
 
@@ -42,6 +30,15 @@ Version 4.8.0 - 2018-04-23
 * Add invoice usage to party's contact mechanisms
 * Show reconciled date on invoice
 * Make description on invoice line optional
+
+Version 4.6.3 - 2018-04-03
+* Bug fixes (see mercurial logs for details)
+
+Version 4.6.2 - 2018-03-01
+* Bug fixes (see mercurial logs for details)
+
+Version 4.6.1 - 2018-01-04
+* Bug fixes (see mercurial logs for details)
 
 Version 4.6.0 - 2017-10-30
 * Bug fixes (see mercurial logs for details)
