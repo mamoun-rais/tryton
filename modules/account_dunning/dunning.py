@@ -224,14 +224,7 @@ class Dunning(ModelSQL, ModelView):
             ]
 
     @classmethod
-    def generate_dunnings(cls, date=None):
-        pool = Pool()
-        Date = pool.get('ir.date')
-        MoveLine = pool.get('account.move.line')
-
-        if date is None:
-            date = Date.today()
-
+    def update_dunnings(cls, date):
         set_level = defaultdict(list)
         with Transaction().set_context(_check_access=True):
             dunnings = cls.search([
@@ -267,9 +260,23 @@ class Dunning(ModelSQL, ModelView):
         if to_write:
             cls.write(*to_write)
 
+    @classmethod
+    def generate_dunnings(cls, date=None):
+        pool = Pool()
+        Date = pool.get('ir.date')
+        MoveLine = pool.get('account.move.line')
+
+        if date is None:
+            date = Date.today()
+        # JMO : Split method in two for easier overriding
+        cls.update_dunnings(date)
         with Transaction().set_context(_check_access=True):
             lines = MoveLine.search(cls._overdue_line_domain(date))
         lines = MoveLine.browse(lines)
+        cls._generate_dunnings(date, lines)
+
+    @classmethod
+    def _generate_dunnings(cls, date, lines):
         dunnings = (cls._get_dunning(line, date) for line in lines)
         cls.save([d for d in dunnings if d])
 
@@ -284,7 +291,6 @@ class Dunning(ModelSQL, ModelView):
         else:
             return
         return cls(
-            company=line.account.company,
             line=line,
             procedure=procedure,
             level=level,
