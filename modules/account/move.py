@@ -557,8 +557,7 @@ class Reconciliation(ModelSQL, ModelView):
                             line=line.rec_name,
                             party1=line.party.rec_name,
                             party2=party.rec_name))
-            if (account
-                    and not account.company.currency.is_zero(debit - credit)):
+            if not account.company.currency.is_zero(debit - credit):
                 lang = Lang.get()
                 debit = lang.currency(debit, account.company.currency)
                 credit = lang.currency(credit, account.company.currency)
@@ -717,8 +716,6 @@ class Line(ModelSQL, ModelView):
         cls.__rpc__.update({
                 'on_write': RPC(instantiate=0),
                 })
-        # Do not cache default_date nor default_move
-        cls.__rpc__['default_get'].cache = None
         cls._order[0] = ('id', 'DESC')
 
     @classmethod
@@ -958,6 +955,12 @@ class Line(ModelSQL, ModelView):
         return [('account.rec_name',) + tuple(clause[1:])]
 
     @classmethod
+    def get_query_get_where_clause(cls, table, where):
+        # RSE add hook to override where clause #9462
+        # overriden in account_per_product module
+        return where
+
+    @classmethod
     def query_get(cls, table):
         '''
         Return SQL clause and fiscal years for account move line
@@ -1016,6 +1019,7 @@ class Line(ModelSQL, ModelView):
                     ])
             fiscalyear_ids = list(map(int, fiscalyears))
 
+        where = cls.get_query_get_where_clause(table, where)
         # Use LEFT JOIN to allow database optimization
         # if no joined table is used in the where clause.
         return (table.move.in_(move
@@ -1641,36 +1645,37 @@ class Reconcile(Wizard):
                 having=having))
         return [p for p, in cursor.fetchall()]
 
+    def _next_account(self):
+        accounts = list(self.show.accounts)
+        if not accounts:
+            return
+        account = accounts.pop()
+        self.show.account = account
+        self.show.parties = self.get_parties(account)
+        self.show.accounts = accounts
+        return account
+
+    def _next_party(self):
+        parties = list(self.show.parties)
+        if not parties:
+            return
+        party = parties.pop()
+        self.show.party = party
+        self.show.parties = parties
+        return party
+
+
     def transition_next_(self):
-
-        def next_account():
-            accounts = list(self.show.accounts)
-            if not accounts:
-                return
-            account = accounts.pop()
-            self.show.account = account
-            self.show.parties = self.get_parties(account)
-            self.show.accounts = accounts
-            return account
-
-        def next_party():
-            parties = list(self.show.parties)
-            if not parties:
-                return
-            party = parties.pop()
-            self.show.party = party
-            self.show.parties = parties
-            return party,
 
         if getattr(self.show, 'accounts', None) is None:
             self.show.accounts = self.get_accounts()
-            if not next_account():
+            if not self._next_account():
                 return 'end'
         if getattr(self.show, 'parties', None) is None:
             self.show.parties = self.get_parties(self.show.account)
 
-        while not next_party():
-            if not next_account():
+        while not self._next_party():
+            if not self._next_account():
                 return 'end'
         return 'show'
 
