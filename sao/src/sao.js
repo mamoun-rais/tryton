@@ -198,7 +198,7 @@ var Sao = {};
         }
     };
 
-    Sao.Date = function(year, month, day) {
+    Sao.Date = function(year, month, day, utc) {
         var date;
         if (month === undefined) {
             date = moment(year);
@@ -206,6 +206,9 @@ var Sao = {};
         }
         else {
             date = moment();
+        }
+        if (utc) {
+            date.utc();
         }
         date.year(year);
         date.month(month);
@@ -259,20 +262,15 @@ var Sao = {};
         }
         datetime.isDateTime = true;
         datetime.local();
-        datetime.todate = function() {
-            return Sao.Date(this.year(), this.month(), this.date());
-        };
-        datetime.totime = function() {
-            return Sao.Time(
-                this.hour(), this.minute(), this.second(), this.millisecond());
-        };
         return datetime;
     };
 
     Sao.DateTime.combine = function(date, time) {
-        return Sao.DateTime(
-            date.year(), date.month(), date.date(),
-            time.hour(), time.minute(), time.second(), time.millisecond());
+        var datetime = date.clone();
+        datetime.set({hour: time.hour(), minute: time.minute(),
+            second: time.second(), millisecond: time.millisecond()});
+        datetime.isDateTime = true;
+        return datetime;
     };
 
     Sao.DateTime.min = moment(new Date(-100000000 * 86400000)).local();
@@ -304,9 +302,9 @@ var Sao = {};
     Sao.config = {};
     Sao.config.limit = 1000;
     Sao.config.display_size = 20;
-    Sao.config.bug_url = 'https://bugs.tryton.org/';
-    Sao.config.title = 'Tryton';
-    Sao.config.icon_colors = '#267f82,#3e4950,#e78e42'.split(',');
+    Sao.config.bug_url = 'https://support.coopengo.com/';
+    Sao.config.title = 'Coog';
+    Sao.config.icon_colors = '#0094d2,#3e4950,#e78e42'.split(',');
     Sao.config.calendar_colors = '#fff,#267f82'.split(',');
     Sao.config.graph_color = '#267f82';
     Sao.config.bus_timeout = 10 * 60 * 1000;
@@ -377,6 +375,7 @@ var Sao = {};
                         Sao.Action.execute(action_id, {}, null, {});
                     });
                     Sao.set_title();
+                    // JMO merge_60, here we had: Coog: avoid icon filled with standard color
                     var new_lang = preferences.language != Sao.i18n.getLocale();
                     var prm = jQuery.Deferred();
                     Sao.i18n.setlang(preferences.language).always(function() {
@@ -476,9 +475,7 @@ var Sao = {};
             }
             try {
                 attributes.view_ids = loads(params.views || '[]');
-                if (params.limit !== undefined) {
-                    attributes.limit = loads(params.limit || 'null');
-                }
+                attributes.limit = loads(params.limi || 'null');
                 attributes.name = loads(params.name || '""');
                 attributes.search_value = loads(params.search_value || '[]');
                 attributes.domain = loads(params.domain || '[]');
@@ -506,8 +503,8 @@ var Sao = {};
         }
         function open_wizard(path) {
             var attributes = {};
-            attributes.action = path[0];
-            if (!attributes.action) {
+            attributes.name = path[0];
+            if (!attributes.name) {
                 return;
             }
             try {
@@ -683,28 +680,30 @@ var Sao = {};
     };
 
     Sao.user_menu = function(preferences) {
+        var avatar_url = preferences.avatar_url || '';
+        if (avatar_url) {
+            avatar_url += '?s=30';
+        }
+        var avatar_badge_url = preferences.avatar_badge_url || '';
+        if (avatar_badge_url){
+            avatar_badge_url += '?s=15';
+        }
         jQuery('#user-preferences').empty();
         jQuery('#user-favorites').empty();
-        var user = jQuery('<a/>', {
+        jQuery('#user-preferences').append(jQuery('<a/>', {
             'href': '#',
             'title': preferences.status_bar,
         }).click(function(evt) {
             evt.preventDefault();
             Sao.preferences();
-        }).text(preferences.status_bar);
-        jQuery('#user-preferences').append(user);
-        if (preferences.avatar_badge_url) {
-            user.prepend(jQuery('<img/>', {
-                'src': preferences.avatar_badge_url + '?s=15',
+        }).text(preferences.status_bar)
+            .prepend(jQuery('<img/>', {
+                'src': avatar_badge_url,
                 'class': 'img-circle img-badge',
-            }));
-        }
-        if (preferences.avatar_url) {
-            user.prepend(jQuery('<img/>', {
-                'src': preferences.avatar_url + '?s=30',
+            })).prepend(jQuery('<img/>', {
+                'src': avatar_url,
                 'class': 'img-circle',
-            }));
-        }
+            })));
         var title = Sao.i18n.gettext("Logout");
         jQuery('#user-logout > a')
             .attr('title', title)
@@ -750,7 +749,8 @@ var Sao = {};
             'view_ids': view_ids,
             'domain': domain,
             'context': action_ctx,
-            'selection_mode': Sao.common.SELECTION_NONE,
+            // [Coog Specific] dbclick on menu entries
+            'selection_mode': Sao.common.SELECTION_SINGLE,
             'limit': null,
             'row_activate': Sao.main_menu_row_activate,
         });
@@ -939,7 +939,7 @@ var Sao = {};
         format: function(content) {
             var el = jQuery('<div/>');
             Sao.common.ICONFACTORY.get_icon_img(
-                content.icon, {'class': 'global_search-icon'})
+                content.icon, {'class': 'global-search-icon'})
                 .appendTo(el);
             jQuery('<span/>', {
                 'class': 'global-search-text'
@@ -948,12 +948,9 @@ var Sao = {};
         },
         update: function(text) {
             var ir_model = new Sao.Model('ir.model');
-            if (!text) {
-                return jQuery.when([]);
-            }
             return ir_model.execute('global_search',
                     [text, Sao.config.limit, Sao.main_menu_screen.model_name],
-                    Sao.main_menu_screen.context)
+                    Sao.main_menu_screen.context, undefined, false)
                 .then(function(s_results) {
                 var results = [];
                 for (var i=0, len=s_results.length; i < len; i++) {

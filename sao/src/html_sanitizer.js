@@ -91,9 +91,6 @@ SOFTWARE.
                 }
             } else {
                 new_node = document.createDocumentFragment();
-                if (node.tagName != 'SCRIPT') {
-                    new_node.textContent = node.textContent;
-                }
             }
             return new_node;
         }

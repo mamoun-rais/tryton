@@ -102,9 +102,6 @@
             "decode(Eval('test', 0))");
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), 0,
             "decode(Eval('test', 0))");
-        QUnit.strictEqual(
-            new Sao.PYSON.Decoder({test: undefined}).decode(eval_), 0,
-            "decode(Eval('test', 0))");
     });
 
     QUnit.test('PYSON Not', function() {
@@ -471,18 +468,18 @@
             'Date(2020, 0, 2)))');
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Greater(
-            new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 1000),
-            Sao.Date(2020, 0, 1)));
-        QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), true,
-            'decode(Greater(PYSON.DateTime(2020, 1, 1, 0, 0, 0, 1000), ' +
-            'Date(2020, 0, 1)))');
+            new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0),
+            Sao.Date(2020, 0, 1, true)));
+        QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), false,
+            'decode(Greater(PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0), ' +
+            'Date(2020, 0, 1, true)))');
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Greater(
             new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0),
-            Sao.Date(2020, 0, 1), true));
+            Sao.Date(2020, 0, 1, true), true));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), true,
             'decode(Greater(PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0), ' +
-            'Date(2020, 0, 1), true))');
+            'Date(2020, 0, 1, true), true))');
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Greater(
             new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0),
@@ -493,7 +490,7 @@
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Greater(
             new Sao.PYSON.Date(2020, 1, 1),
-            Sao.Date(2020, 0, 1)));
+            Sao.Date(2020, 0, 1, true)));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), false,
             'decode(Greater(PYSON.Date(2020, 1, 1), Date(2020, 0, 1)))');
 
@@ -590,10 +587,10 @@
                 "Less(0, 1, false)");
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Less(
-            new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 1000),
+            new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0),
             Sao.Date(2020, 0, 1)));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), false,
-            'decode(Less(PYSON.DateTime(2020, 1, 1, 0, 0, 0, 1000), ' +
+            'decode(Less(PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0), ' +
             'Date(2020, 0, 1)))');
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Less(
@@ -618,10 +615,10 @@
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Less(
             new Sao.PYSON.Date(2020, 1, 1),
-            new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 1000)));
+            new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 1, 0)));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), true,
             'decode(Less(PYSON.Date(2020, 1, 1), ' +
-            'PYSON.DateTime(2020, 1, 1, 0, 0, 1000)))');
+            'PYSON.DateTime(2020, 1, 1, 0, 0, 1, 0)))');
 
         eval_ = new Sao.PYSON.Encoder().encode(new Sao.PYSON.Less(
             new Sao.PYSON.DateTime(2020, 1, 1, 0, 0, 0, 0),
@@ -772,12 +769,6 @@
             new Sao.PYSON.In('test', []));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_), false,
                 "decode(In('test', []))");
-
-        eval_ = new Sao.PYSON.Encoder().encode(
-            new Sao.PYSON.In('test', new Sao.PYSON.Eval('foo', [])));
-        QUnit.strictEqual(new Sao.PYSON.Decoder({'foo': null}).decode(eval_),
-            false, "decode(In('test', Eval('foo', [])))");
-
         QUnit.strictEqual(new Sao.PYSON.In('foo', ['foo', 'bar']).toString(),
                 'In("foo", ["foo", "bar"])');
     });
@@ -826,27 +817,27 @@
         eval_ = new Sao.PYSON.Encoder().encode(
                 new Sao.PYSON.Date(2010, 1, 12));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_).valueOf(),
-                new Date(2010, 0, 12).valueOf());
+                Sao.Date(2010, 0, 12, true).valueOf());
 
         eval_ = new Sao.PYSON.Encoder().encode(
                 new Sao.PYSON.Date(2010, 1, 12, -1));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_).valueOf(),
-                new Date(2009, 0, 12).valueOf());
+                Sao.Date(2009, 0, 12, true).valueOf());
 
         eval_ = new Sao.PYSON.Encoder().encode(
                 new Sao.PYSON.Date(2010, 1, 12, 0, 12));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_).valueOf(),
-                new Date(2011, 0, 12).valueOf());
+                Sao.Date(2011, 0, 12, true).valueOf());
 
         eval_ = new Sao.PYSON.Encoder().encode(
                 new Sao.PYSON.Date(2010, 1, 12, 0, 0, -7));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_).valueOf(),
-                new Date(2010, 0, 5).valueOf());
+                Sao.Date(2010, 0, 5, true).valueOf());
 
         eval_ = new Sao.PYSON.Encoder().encode(
                 new Sao.PYSON.Date(2010, 2, 22));
         QUnit.strictEqual(new Sao.PYSON.Decoder().decode(eval_).valueOf(),
-                new Date(2010, 1, 22).valueOf());
+                Sao.Date(2010, 1, 22, true).valueOf());
 
         QUnit.strictEqual(
             new Sao.PYSON.Date(2010, 1, 12, -1, 12, -7).toString(),
@@ -875,7 +866,7 @@
 
         QUnit.strictEqual(new Sao.PYSON.Decoder(
             {'datetime': datetime}).decode(eval_).valueOf(),
-            Sao.Date(2000, 1, 1).valueOf());
+            Sao.Date(2000, 1, 1, true).valueOf());
 
         eval_ = new Sao.PYSON.Encoder().encode(
             new Sao.PYSON.Date(
@@ -885,7 +876,7 @@
 
         QUnit.strictEqual(new Sao.PYSON.Decoder(
             {'foo': 'bar'}).decode(eval_).valueOf(),
-            Sao.Date().valueOf());
+            Sao.Date(undefined, undefined, undefined, true).valueOf());
     });
 
     QUnit.test('PYSON DateTime', function() {
@@ -1238,20 +1229,6 @@
                 new Sao.PYSON.Decoder(ctx).decode(eval_), result,
                 "decode(" + JSON.stringify(ctx) + ")");
         });
-    });
-
-    QUnit.test('PYSON.EVal dot notation in context', function() {
-        var eval_ = new Sao.PYSON.Encoder().encode(
-            new Sao.PYSON.Eval('foo.bar', 0));
-        var ctx = {
-            'foo.bar': 1,
-            'foo': {
-                'bar': 0,
-            },
-        };
-        QUnit.strictEqual(
-            new Sao.PYSON.Decoder(ctx).decode(eval_), 1,
-            "decode(" + JSON.stringify(ctx) + ")");
     });
 
     QUnit.test('PYSON eval', function() {
@@ -1626,27 +1603,22 @@
 
     QUnit.test('DomainParser.convert_value', function() {
         var parser = new Sao.common.DomainParser();
-        var context = {
-            'date_format': '%Y-%m-%d',
-        };
 
         var test_func = function(test) {
             var value = test[0];
             var result = test[1];
-            QUnit.strictEqual(
-                parser.convert_value(this, value, context), result,
+            QUnit.strictEqual(parser.convert_value(this, value), result,
                 'convert_value(' + JSON.stringify(this) + ', ' +
-                JSON.stringify(value) + ', ' + JSON.stringify(context) + ')');
+                    JSON.stringify(value) + ')');
         };
 
         var test_valueOf_func = function(test) {
             var value = test[0];
             var result = test[1];
-            QUnit.strictEqual(
-                parser.convert_value(this, value, context).valueOf(),
+            QUnit.strictEqual(parser.convert_value(this, value).valueOf(),
                 result.valueOf(),
                 'convert_value(' + JSON.stringify(this) + ', ' +
-                JSON.stringify(value) + ', ' + JSON.stringify(context) + ')');
+                    JSON.stringify(value) + ')');
         };
 
         var field = {
@@ -1920,18 +1892,13 @@
 
     QUnit.test('DomainParser.format_value', function() {
         var parser = new Sao.common.DomainParser();
-        var context = {
-            'date_format': '%Y-%m-%d',
-        };
 
         var test_func = function(test) {
             var value = test[0];
             var result = test[1];
-            QUnit.strictEqual(
-                parser.format_value(this, value, null, context), result,
+            QUnit.strictEqual(parser.format_value(this, value), result,
                 'format_value(' + JSON.stringify(this) + ', ' +
-                JSON.stringify(value) + ', null, ' + JSON.stringify(context) +
-                ')');
+                    JSON.stringify(value) + ')');
         };
 
         var field = {
@@ -2166,7 +2133,7 @@
         [[['name', 'ilike', '%<%']], 'Name: "" "<"'],
         [[['name', 'ilike', 'Doe']], 'Name: =Doe'],
         [[['name', 'ilike', 'Doe%']], 'Name: Doe%'],
-        [[['name', 'ilike', 'Doe\\%']], 'Name: =Doe%'],
+        [[['name', 'ilike', 'Doe%%']], 'Name: =Doe%'],
         [[['name', 'not ilike', '%Doe%']], 'Name: !Doe'],
         [[['name', 'in', ['John', 'Jane']]], 'Name: John;Jane'],
         [[['name', 'not in', ['John', 'Jane']]], 'Name: !John;Jane'],
@@ -2678,7 +2645,7 @@
         var unique_value = domain_inversion.unique_value;
         var compare = Sao.common.compare;
         var domain = [['a', '=', 1]];
-        QUnit.ok(compare(unique_value(domain), [true, 'a', 1]));
+        QUnit.ok(compare(unique_value(domain), [true, '=', 1]));
         domain = [['a', '!=', 1]];
         QUnit.ok(!unique_value(domain)[0]);
         domain = [['a', '=', 1], ['a', '=', 2]];
@@ -2686,7 +2653,7 @@
         domain = [['a.b', '=', 1]];
         QUnit.ok(!unique_value(domain)[0]);
         domain = [['a.id', '=', 1, 'model']];
-        QUnit.ok(compare(unique_value(domain), [true, 'a.id', ['model', 1]]));
+        QUnit.ok(compare(unique_value(domain), [true, '=', ['model', 1]]));
         domain = [['a.b.id', '=', 1, 'model']];
         QUnit.ok(compare(unique_value(domain), [false, null, null]));
     });
@@ -3002,8 +2969,6 @@
         ['Name: !=foo', []],
         ['', ["Name: "]],
         [' ', ["", "Name: "]],
-        ["Name: foo or", ["Name: foo"]],
-        ['Name: foo (Name: foo or N', ["Name: foo (Name: foo or Name: "]],
         ].forEach(function(test) {
             var value = test[0];
             var expected = test[1];
@@ -3076,7 +3041,6 @@
             ['<div align="left">Test</div>', '<div align="left">Test</div>'],
             ['<font href="test" size="1">Test</font>',
                 '<font size="1">Test</font>'],
-            ["<p>Test</p>", "Test"],
         ];
         for (var i = 0; i < examples.length; i++) {
             var input = examples[i][0], output = examples[i][1];

@@ -223,6 +223,7 @@
             dfd.resolve(session);
             return dfd;
         }
+
         var dialog = Sao.Session.login_dialog();
 
         var empty_field = function() {

@@ -13,6 +13,7 @@
             this.name = '';
             this.name_el = jQuery('<span/>');
             this.view_prm = jQuery.when();
+            this.forced_count = false;
         },
         menu_def: function() {
             return [
@@ -252,31 +253,22 @@
                 this.buttons[item.id].click(item, function(event) {
                     var item = event.data;
                     var button = this.buttons[item.id];
-                    // Use data instead of disabled prop because the action may
-                    // actually disable the button.
-                    if (button.data('disabled')) {
-                        event.preventDefault();
-                        return;
-                    }
-                    button.data('disabled', true);
+                    button.prop('disabled', true);
                     (this[item.id](this) || jQuery.when())
                         .always(function() {
-                            button.data('disabled', false);
+                            button.prop('disabled', false);
                         });
                 }.bind(this));
             };
             this.menu_def().forEach(add_button.bind(this));
-            if (this.buttons.previous) {
-                this.status_label = jQuery('<span/>', {
-                    'class': 'badge',
-                }).appendTo(jQuery('<div/>', {
-                    'class': 'navbar-text hidden-xs',
-                }).insertAfter(this.buttons.previous));
-                this.buttons.previous.addClass('hidden-xs');
-            }
-            if (this.buttons.next) {
-                this.buttons.next.addClass('hidden-xs');
-            }
+            this.status_label = jQuery('<span/>', {
+                'class': 'badge',
+            }).appendTo(jQuery('<div/>', {
+                'class': 'navbar-text hidden-xs',
+            }).insertAfter(this.buttons.previous));
+            this.status_label.click(this._force_count.bind(this));
+            this.buttons.previous.addClass('hidden-xs');
+            this.buttons.next.addClass('hidden-xs');
             toolbar.find('.btn-toolbar > .btn-group').last()
                 .addClass( 'hidden-xs')
                 .find('.dropdown')
@@ -323,7 +315,7 @@
         },
         set_name: function(name) {
             this.name = name;
-            this.name_el.text(Sao.common.ellipsize(name, 20));
+            this.name_el.text(Sao.common.ellipsize(name.split(' / ').pop(), 20));
             this.name_el.attr('title', name);
         },
         get_url: function() {
@@ -331,6 +323,9 @@
         compare: function(attributes) {
             return false;
         },
+        _force_count: function(evt) {
+            this.forced_count = true;
+        }
     });
 
     Sao.Tab.counter = 0;
@@ -402,7 +397,7 @@
             'data-toggle': 'tab',
             'href': '#' + tab.id
         }).on('show.bs.tab', function() {
-            Sao.set_url(tab.get_url(), tab.name);
+            Sao.set_url(tab.get_url(), tab.name.split(' / ').pop());
         })
         .append(jQuery('<button/>', {
             'class': 'close'
@@ -428,12 +423,6 @@
             id: tab.id
         }).append(tab.el)
         .appendTo(tabcontent);
-        tab_link.on('hide.bs.tab', function(evt) {
-            jQuery(evt.target).data('scrollTop', tabs.scrollTop());
-        });
-        tab_link.on('shown.bs.tab', function(evt) {
-            tabs.scrollTop(jQuery(evt.target).data('scrollTop') || 0);
-        });
         tab_link.tab('show');
         tabs.trigger('ready');
     };
@@ -487,7 +476,7 @@
             screen.message_callback = this.record_message.bind(this);
             screen.switch_callback = function() {
                 if (this === Sao.Tab.tabs.get_current()) {
-                    Sao.set_url(this.get_url(), this.name);
+                    Sao.set_url(this.get_url(), this.name.split(' / ').pop());
                 }
             }.bind(this);
 
@@ -519,20 +508,22 @@
         create_toolbar: function() {
             var toolbar = Sao.Tab.Form._super.create_toolbar.call(this);
             var screen = this.screen;
-            var toolbars = screen.model.execute(
-                'view_toolbar_get', [], screen.context, false);
-            [
+            var buttons = this.buttons;
+            var prm = screen.model.execute('view_toolbar_get', [],
+                screen.context);
+            prm.done(function(toolbars) {
+                [
                 ['action', 'tryton-launch',
                     Sao.i18n.gettext('Launch action')],
                 ['relate', 'tryton-link',
-                    Sao.i18n.gettext('Open related records')],
+                     Sao.i18n.gettext('Open related records')],
                 ['print', 'tryton-print',
-                    Sao.i18n.gettext('Print report')]
-            ].forEach(function(menu_action) {
-                var dropdown = jQuery('<div/>', {
-                    'class': 'btn-group dropdown',
-                    'role': 'group'
-                })
+                     Sao.i18n.gettext('Print report')]
+                ].forEach(function(menu_action) {
+                    var button = jQuery('<div/>', {
+                        'class': 'btn-group dropdown',
+                        'role': 'group'
+                    })
                     .append(jQuery('<button/>', {
                         'type': 'button',
                         'class': 'btn btn-default navbar-btn dropdown-toggle',
@@ -555,39 +546,38 @@
                         'aria-labelledby': menu_action[0]
                     }))
                     .insertBefore(toolbar.find('button#email'));
-                var button = dropdown.find('button');
-                this.buttons[menu_action[0]] = button;
-                dropdown
-                    .on('show.bs.dropdown', function() {
-                        jQuery(this).parents('.btn-group').removeClass(
-                            'hidden-xs');
-                    }).on('hide.bs.dropdown', function() {
-                        jQuery(this).parents('.btn-group').addClass(
-                            'hidden-xs');
-                    });
-                var menu = dropdown.find('.dropdown-menu');
-                button.click(function() {
-                    menu.find([
-                        '.' + menu_action[0] + '_button',
-                        '.divider-button',
-                        '.' + menu_action[0] + '_plugin',
-                        '.divider-plugin'].join(',')).remove();
-                    var buttons = screen.get_buttons().filter(
-                        function(button) {
-                            return menu_action[0] == (
-                                button.attributes.keyword || 'action');
+                    buttons[menu_action[0]] = button;
+                    var dropdown = button
+                        .on('show.bs.dropdown', function() {
+                            jQuery(this).parents('.btn-group').removeClass(
+                                    'hidden-xs');
+                        }).on('hide.bs.dropdown', function() {
+                            jQuery(this).parents('.btn-group').addClass(
+                                    'hidden-xs');
                         });
-                    if (buttons.length) {
-                        menu.append(jQuery('<li/>', {
-                            'role': 'separator',
-                            'class': 'divider divider-button',
-                        }));
-                    }
-                    buttons.forEach(function(button) {
-                        var item = jQuery('<li/>', {
-                            'role': 'presentation',
-                            'class': menu_action[0] + '_button'
-                        })
+                    var menu = button.find('.dropdown-menu');
+                    button.click(function() {
+                        menu.find([
+                            '.' + menu_action[0] + '_button',
+                            '.divider-button',
+                            '.' + menu_action[0] + '_plugin',
+                            '.divider-plugin'].join(',')).remove();
+                        var buttons = screen.get_buttons().filter(
+                            function(button) {
+                                return menu_action[0] == (
+                                    button.attributes.keyword || 'action');
+                            });
+                        if (buttons.length) {
+                            menu.append(jQuery('<li/>', {
+                                'role': 'separator',
+                                'class': 'divider divider-button',
+                            }));
+                        }
+                        buttons.forEach(function(button) {
+                            var item = jQuery('<li/>', {
+                                'role': 'presentation',
+                                'class': menu_action[0] + '_button'
+                            })
                             .append(
                                 jQuery('<a/>', {
                                     'role': 'menuitem',
@@ -599,40 +589,40 @@
                                 evt.preventDefault();
                                 screen.button(button.attributes);
                             })
-                            .appendTo(menu);
-                    });
+                        .appendTo(menu);
+                        });
 
-                    var kw_plugins = [];
-                    Sao.Plugins.forEach(function(plugin) {
-                        plugin.get_plugins(screen.model.name).forEach(
-                            function(spec) {
-                                var name = spec[0],
-                                    func = spec[1],
-                                    keyword = spec[2] || 'action';
-                                if (keyword != menu_action[0]) {
-                                    return;
-                                }
-                                kw_plugins.push([name, func]);
-                            });
-                    });
-                    if (kw_plugins.length) {
-                        menu.append(jQuery('<li/>', {
-                            'role': 'separator',
-                            'class': 'divider divider-plugin',
-                        }));
-                    }
-                    kw_plugins.forEach(function(plugin) {
-                        var name = plugin[0],
-                            func = plugin[1];
-                        jQuery('<li/>', {
-                            'role': 'presentation',
-                            'class': menu_action[0] + '_plugin',
-                        }).append(
-                            jQuery('<a/>', {
-                                'role': 'menuitem',
-                                'href': '#',
-                                'tabindex': -1,
-                            }).text(name))
+                        var kw_plugins = [];
+                        Sao.Plugins.forEach(function(plugin) {
+                            plugin.get_plugins(screen.model.name).forEach(
+                                function(spec) {
+                                    var name = spec[0],
+                                        func = spec[1],
+                                        keyword = spec[2] || 'action';
+                                    if (keyword != menu_action[0]) {
+                                        return;
+                                    }
+                                    kw_plugins.push([name, func]);
+                                });
+                        });
+                        if (kw_plugins.length) {
+                            menu.append(jQuery('<li/>', {
+                                'role': 'separator',
+                                'class': 'divider divider-plugin',
+                            }));
+                        }
+                        kw_plugins.forEach(function(plugin) {
+                            var name = plugin[0],
+                                func = plugin[1];
+                            jQuery('<li/>', {
+                                'role': 'presentation',
+                                'class': menu_action[0] + '_plugin',
+                            }).append(
+                                jQuery('<a/>', {
+                                    'role': 'menuitem',
+                                    'href': '#',
+                                    'tabindex': -1,
+                                }).text(name))
                             .click(function(evt) {
                                 evt.preventDefault();
                                 var ids = screen.current_view.selected_records
@@ -652,13 +642,13 @@
                                 });
                             })
                             .appendTo(menu);
+                        });
                     });
-                });
 
-                toolbars[menu_action[0]].forEach(function(action) {
-                    var item = jQuery('<li/>', {
-                        'role': 'presentation'
-                    })
+                    toolbars[menu_action[0]].forEach(function(action) {
+                        var item = jQuery('<li/>', {
+                            'role': 'presentation'
+                        })
                         .append(jQuery('<a/>', {
                             'role': 'menuitem',
                             'href': '#',
@@ -697,26 +687,19 @@
                             });
                         }.bind(this))
                         .appendTo(menu);
-                }.bind(this));
+                    }.bind(this));
 
-                if (menu_action[0] != 'action') {
-                    button._can_be_sensitive = Boolean(
-                        menu.children().length);
-                }
-
-                if ((menu_action[0] == 'print') &&
-                    toolbars.exports.length) {
-                    button._can_be_sensitive = true;
-                    if (toolbars.print.length) {
-                        menu.append(jQuery('<li/>', {
-                            'role': 'separator',
-                            'class': 'divider',
-                        }));
-                    }
-                    toolbars.exports.forEach(function(export_) {
-                        var item = jQuery('<li/>', {
-                            'role': 'presentation',
-                        })
+                    if (menu_action[0] == 'print') {
+                        if (toolbars.exports.length && toolbars.print.length) {
+                            menu.append(jQuery('<li/>', {
+                                'role': 'separator',
+                                'class': 'divider',
+                            }));
+                        }
+                        toolbars.exports.forEach(function(export_) {
+                            var item = jQuery('<li/>', {
+                                'role': 'presentation',
+                            })
                             .append(jQuery('<a/>', {
                                 'role': 'menuitem',
                                 'href': '#',
@@ -727,8 +710,9 @@
                                 this.do_export(export_);
                             }.bind(this))
                             .appendTo(menu);
-                    }.bind(this));
-                }
+                        }.bind(this));
+                    }
+                }.bind(this));
             }.bind(this));
             this.buttons.attach
                 .on('dragover', false)
@@ -761,19 +745,11 @@
                     JSON.stringify(attributes.context)) &&
                 (compare(
                     this.attributes.search_value || [],
-                    attributes.search_value || [])) &&
-                (JSON.stringify(this.screen.attributes.tab_domain) ===
-                    JSON.stringify(attributes.tab_domain))
+                    attributes.search_value || []))
             );
         },
         _close_allowed: function() {
-            return this.modified_save().then(null, function(result) {
-                if (result) {
-                    return jQuery.Deferred().resolve();
-                } else {
-                    return jQuery.Deferred().reject();
-                }
-            });
+            return this.modified_save();
         },
         modified_save: function() {
             this.screen.save_tree_state();
@@ -789,14 +765,13 @@
                             case 'ko':
                                 var record_id = this.screen.current_record.id;
                                 return this.reload(false).then(function() {
-                                    if (record_id < 0) {
-                                        return jQuery.Deferred().reject(true);
-                                    }
-                                    else if (this.screen.current_record) {
+                                    if (this.screen.current_record) {
                                         if (record_id !=
                                             this.screen.current_record.id) {
                                             return jQuery.Deferred().reject();
                                         }
+                                    } else if (record_id < 0) {
+                                        return jQuery.Deferred().resolve();
                                     }
                                 }.bind(this));
                             default:
@@ -1403,8 +1378,7 @@
                 resources = {};
             }
             var record_id = this.screen.get_id();
-            var disabled = (
-                record_id < 0 || record_id === null || record_id === undefined);
+            var disabled = record_id < 0 || record_id === null;
 
             var update = function(name, title, text, color) {
                 var button = this.buttons[name];
@@ -1460,25 +1434,13 @@
                 if (data[0] !== 0) {
                     name = data[0];
                 }
-                var buttons = ['print', 'relate', 'email', 'save', 'attach'];
+                var buttons = ['print', 'relate', 'attach'];
                 buttons.forEach(function(button_id){
                     var button = this.buttons[button_id];
-                    var can_be_sensitive = button._can_be_sensitive;
-                    if (can_be_sensitive === undefined) {
-                        can_be_sensitive = true;
+                    if (button) {
+                        var disabled = button.is(':disabled');
+                        button.prop('disabled', disabled || data[0] === 0);
                     }
-                    if ((button_id == 'print') ||
-                        (button_id == 'relate') ||
-                        (button_id == 'email')) {
-                        can_be_sensitive |= this.screen.get_buttons().some(
-                            function(button) {
-                                var keyword = button.attributes.keyword || 'action';
-                                return keyword == button_id;
-                            });
-                    } else if (button_id == 'save') {
-                        can_be_sensitive &= !this.screen.readonly;
-                    }
-                    button.prop('disabled', !(data[0] && can_be_sensitive));
                 }.bind(this));
                 this.buttons.switch_.prop('disabled',
                     this.attributes.view_ids > 1);
@@ -1488,31 +1450,48 @@
                 this.menu_buttons.save.toggleClass(
                     'disabled', this.screen.readonly);
 
-                var msg = name + ' / ' + data[1];
-                if ((data[1] < data[2]) &&
-                    this.screen.limit !== null &&
-                    (data[2] > this.screen.limit)) {
-                    msg += Sao.i18n.gettext(' of ') + data[2];
+                var msg;
+                var size_display_func;
+                var size = data[1];
+                var max_size = data[2];
+
+                if (this.forced_count) {
+                    size_display_func = (x) => x;
+                } else {
+                    size_display_func = Sao.common.humanize;
+                }
+                if (size < max_size) {
+                    msg = (
+                        name + '@' +
+                        size_display_func(size) + '/' +
+                        size_display_func(max_size));
+                    if (!this.forced_count &&
+                            (max_size >= this.screen.count_limit)) {
+                        msg += '+';
+                    }
+                } else {
+                    msg = name + '/' + size_display_func(size);
                 }
                 this.status_label.text(msg).attr('title', msg);
             }
             this.info_bar.message();
             // TODO activate_save
             this.refresh_attachment_preview();
+            this.forced_count = false;
         },
         action: function() {
             window.setTimeout(function() {
-                this.buttons.action.click();
+                this.buttons.action.find('button').click();
             }.bind(this));
         },
         relate: function() {
             window.setTimeout(function() {
-                this.buttons.relate.click();
+                this.buttons.relate.find('button').click();
             }.bind(this));
         },
         print: function() {
             window.setTimeout(function() {
-                this.buttons.print.click();
+                this.buttons.print.find('button').click();
             }.bind(this));
         },
         export: function(){
@@ -1580,6 +1559,11 @@
         },
         get_url: function() {
             return this.screen.get_url(this.name);
+        },
+        _force_count: function(evt) {
+            Sao.Tab.Form._super._force_count.call(this, evt);
+            var domain = this.screen.screen_container.get_text();
+            this.screen._force_count(domain);
         },
     });
 
@@ -1661,24 +1645,27 @@
             this.title.text(this.name_el.text());
             this.content.remove();
             this.content = wizard.form;
-            this.main.css('padding-top', 0).append(wizard.form);
+            this.el.append(wizard.form);
         },
         create_toolbar: function() {
             return jQuery('<span/>');
         },
         _close_allowed: function() {
             var wizard = this.wizard;
+            var prm = jQuery.when();
             if ((wizard.state !== wizard.end_state) &&
                 (wizard.end_state in wizard.states)) {
-                wizard.response(
+                prm = wizard.response(
                     wizard.states[wizard.end_state].attributes);
             }
             var dfd = jQuery.Deferred();
-            if (wizard.state === wizard.end_state) {
-                dfd.resolve();
-            } else {
-                dfd.reject();
-            }
+            prm.always(function() {
+                if (wizard.state === wizard.end_state) {
+                    dfd.resolve();
+                } else {
+                    dfd.reject();
+                }
+            });
             return dfd.promise();
         }
     });

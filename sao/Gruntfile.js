@@ -135,15 +135,11 @@ module.exports = function(grunt) {
     },
     qunit: {
         options: {
-            timeout: 300000,
             puppeteer: {
                 headless: true,
                 args: [
                     '--no-sandbox',
                 ],
-                env: {
-                    TZ: 'UTC',
-                },
             },
         },
         all: ['tests/*.html']

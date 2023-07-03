@@ -10,11 +10,6 @@
         },
         set record(value) {
             this._record = value;
-        },
-        button_clicked: function(event) {
-            if (Sao.common.compare(this.screen.selected_records, [this.record])) {
-                Sao.View.ListGroupViewForm._super.button_clicked.call(this, event);
-            }
         }
     });
 
@@ -137,7 +132,7 @@
                 }
                 this.select_records(i, view_form_idx);
             } else {
-                if (!(event_.ctrlKey || event_.metaKey)) {
+                if (!event_.ctrlKey) {
                     this.select_records(null, null);
                 }
                 this.record = view_form.record;

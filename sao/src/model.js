@@ -24,7 +24,7 @@
             }
             return added;
         },
-        execute: function(method, params, context, async) {
+        execute: function(method, params, context, async, process_exception) {
             if (context === undefined) {
                 context = {};
             }
@@ -32,7 +32,7 @@
                 'method': 'model.' + this.name + '.' + method,
                 'params': params.concat(context)
             };
-            return Sao.rpc(args, this.session, async);
+            return Sao.rpc(args, this.session, async, process_exception);
         },
         copy: function(records, context) {
             if (jQuery.isEmptyObject(records)) {
@@ -583,7 +583,19 @@
             this.destroyed = false;
         },
         has_changed: function() {
-            return !jQuery.isEmptyObject(this._changed);
+            var result = !jQuery.isEmptyObject(this._changed);
+            // JCA : #15014 Add a way to make sure some fields are always
+            // ignored when detecting whether the record needs saving or not
+            if (result === false) {
+                return result;
+            }
+            return Object.keys(this._changed).some(
+          this.check_field_never_modified.bind(this));
+        },
+        check_field_never_modified: function(field) {
+            var fields = this.group.model.fields;
+            return !Object.keys(fields).includes(field) ||
+                !fields[field].description.never_modified;
         },
         save: function(force_reload) {
             if (force_reload === undefined) {
@@ -665,7 +677,7 @@
                     return;
                 }
             }
-            if (async && this.group.prm.state() == 'pending') {
+            if (this.group.prm.state() == 'pending') {
                 return this.group.prm.then(function() {
                     return this.load(name);
                 }.bind(this));
@@ -1016,11 +1028,10 @@
                 this.on_change_with(fieldnames);
                 var callback = function() {
                     if (display) {
-                        return jQuery.when.apply(
-                            jQuery, this.group.root_group.screens
-                            .map(function(screen) {
+                        return this.group.root_group.screens
+                            .forEach(function(screen) {
                                 return screen.display();
-                            }));
+                            });
                     }
                 }.bind(this);
                 if (validate) {
@@ -1222,7 +1233,7 @@
             try {
                 result = this.model.execute(
                     'autocomplete_' + fieldname, [values], this.get_context(),
-                    false);
+                    false, false);
             } catch (e) {
                 result = [];
             }
@@ -1302,7 +1313,12 @@
             var values = this._get_on_change_args(
                 Object.keys(this._changed).concat(['id']));
             return this.model.execute('pre_validate',
-                    [values], this.get_context());
+                    [values], this.get_context())
+                .then(function() {
+                    return true;
+                }, function() {
+                    return false;
+                });
         },
         cancel: function() {
             this._loaded = {};
@@ -1412,11 +1428,7 @@
                 Object.keys(this._values).reduce(function(values, name) {
                     var field = this.model.fields[name];
                     if (field) {
-                        if (field instanceof Sao.field.Binary) {
-                            values[name] = field.get_size(this);
-                        } else {
-                            values[name] = field.get(this);
-                        }
+                        values[name] = field.get(this);
                     }
                     return values;
                 }.bind(this), {}));
@@ -1481,6 +1493,15 @@
                 }
             }
             this.destroyed = true;
+        },
+        _set_modified: function() {
+            var parent = this.group.parent;
+            if (parent) {
+                parent._changed[this.group.child_name] = true;
+                parent.model.fields[this.group.child_name].changed(parent);
+                parent.validate(null, true, false, true);
+                parent._set_modified();
+            }
         }
     });
 
@@ -1509,7 +1530,6 @@
             case 'numeric':
                 return Sao.field.Numeric;
             case 'integer':
-            case 'biginteger':
                 return Sao.field.Integer;
             case 'boolean':
                 return Sao.field.Boolean;
@@ -1549,14 +1569,12 @@
             }
             return value;
         },
-        _has_changed: function(previous, value) {
-            // Use stringify to compare object instance like Number for Decimal
-            return JSON.stringify(previous) != JSON.stringify(value);
-        },
         set_client: function(record, value, force_change) {
             var previous_value = this.get(record);
             this.set(record, value);
-            if (this._has_changed(previous_value, this.get(record))) {
+            // Use stringify to compare object instance like Number for Decimal
+            if (JSON.stringify(previous_value) !=
+                JSON.stringify(this.get(record))) {
                 record._changed[this.name] = true;
                 this.changed(record);
                 record.validate(null, true, false, true);
@@ -1575,8 +1593,9 @@
             return this.get(record);
         },
         set_default: function(record, value) {
-            this.set(record, value);
+            var promise = this.set(record, value);
             record._changed[this.name] = true;
+            return promise;
         },
         set_on_change: function(record, value) {
             this.set(record, value);
@@ -1763,6 +1782,13 @@
 
     Sao.field.Char = Sao.class_(Sao.field.Field, {
         _default: '',
+        set: function(record, value) {
+            // JMO merge_60 : value can apparently be undefined
+            if (this.description.strip && value) {
+                value = value.trim();
+            }
+            Sao.field.Char._super.set.call(this, record, value);
+        },
         get: function(record) {
             return Sao.field.Char._super.get.call(this, record) || this._default;
         }
@@ -1792,12 +1818,6 @@
             return value;
         },
         set_client: function(record, value, force_change) {
-            if (value === null) {
-                value = [];
-            }
-            if (typeof(value) == 'string') {
-                value = [value];
-            }
             if (value) {
                 value = value.slice().sort();
             }
@@ -1822,8 +1842,10 @@
                         value = null;
                     }
                 } else if (value.isDate) {
-                    current_value = this.get(record) || Sao.Time();
-                    value = Sao.DateTime.combine(value, current_value);
+                    current_value = this.get(record);
+                    if (current_value) {
+                        value = Sao.DateTime.combine(value, current_value);
+                    }
                 }
             }
             Sao.field.DateTime._super.set_client.call(this, record, value,
@@ -2044,19 +2066,32 @@
             return rec_name;
         },
         set: function(record, value) {
+            var promise;
             var rec_name = (
                 record._values[this.name + '.'] || {}).rec_name || '';
+            var store_rec_name = function(rec_name) {
+                Sao.setdefault(
+                    record._values, this.name + '.', {})
+                    .rec_name = rec_name[0].rec_name;
+            };
             if (!rec_name && (value >= 0) && (value !== null)) {
                 var model_name = record.model.fields[this.name].description
                     .relation;
-                rec_name = Sao.rpc({
+                promise = Sao.rpc({
                     'method': 'model.' + model_name + '.read',
                     'params': [[value], ['rec_name'], record.get_context()]
-                }, record.model.session, false)[0].rec_name;
+                }, record.model.session).done(store_rec_name.bind(this)).done(
+                        function() {
+                            record.group.root_group.screens.forEach(
+                                function(screen) {
+                                    screen.display();
+                            });
+                       });
+            } else {
+                store_rec_name.call(this, [{'rec_name': rec_name}]);
             }
-            Sao.setdefault(
-                record._values, this.name + '.', {}).rec_name = rec_name;
             record._values[this.name] = value;
+            return promise;
         },
         set_client: function(record, value, force_change) {
             var rec_name;
@@ -2160,29 +2195,16 @@
                 }
             }
             if (mode == 'list ids') {
-                var records_to_remove = [];
                 for (var i = 0, len = group.length; i < len; i++) {
                     var old_record = group[i];
                     if (!~value.indexOf(old_record.id)) {
-                        records_to_remove.push(old_record);
+                        group.remove(old_record, true, true, false, false);
                     }
-                }
-                for (i = 0, len = records_to_remove.length; i < len; i++) {
-                    var record_to_remove = records_to_remove[i];
-                    group.remove(record_to_remove, true, true, false, false);
                 }
                 group.load(value, modified || default_);
             } else {
                 value.forEach(function(vals) {
-                    var new_record;
-                    if ('id' in vals) {
-                        new_record = group.get(vals.id);
-                        if (!new_record) {
-                            new_record = group.new_(false, vals.id);
-                        }
-                    } else {
-                        new_record = group.new_(false);
-                    }
+                    var new_record = group.new_(false);
                     if (default_) {
                         // Don't validate as parent will validate
                         new_record.set_default(vals, false, false);
@@ -2307,12 +2329,13 @@
         },
         set_on_change: function(record, value) {
             var fields, new_fields;
+            // JMO merge_60 , here we add : record.load(this.name);
             record._changed[this.name] = true;
             this._set_default_value(record);
             if (value instanceof Array) {
                 return this._set_value(record, value, false, true);
             }
-            if (value && (value.add || value.update)) {
+            if (value.add || value.update) {
                 var context = this.get_context(record);
                 fields = record._values[this.name].model.fields;
                 var new_field_names = {};
@@ -2352,7 +2375,7 @@
             }
 
             var group = record._values[this.name];
-            if (value && value.delete) {
+            if (value.delete) {
                 value.delete.forEach(function(record_id) {
                     var record2 = group.get(record_id);
                     if (record2) {
@@ -2360,7 +2383,7 @@
                     }
                 }.bind(this));
             }
-            if (value && value.remove) {
+            if (value.remove) {
                 value.remove.forEach(function(record_id) {
                     var record2 = group.get(record_id);
                     if (record2) {
@@ -2369,7 +2392,7 @@
                 }.bind(this));
             }
 
-            if (value && (value.add || value.update)) {
+            if (value.add || value.update) {
                 // First set already added fields to prevent triggering a
                 // second on_change call
                 if (value.update) {
@@ -2614,21 +2637,26 @@
             }
             var rec_name = (
                 record._values[this.name + '.'] || {}).rec_name || '';
+            var store_rec_name = function(rec_name) {
+                Sao.setdefault(
+                    record._values, this.name + '.', {}).rec_name = rec_name;
+            }.bind(this);
             if (ref_model && ref_id !== null && ref_id >= 0) {
                 if (!rec_name && ref_id >= 0) {
-                    rec_name = Sao.rpc({
+                    Sao.rpc({
                         'method': 'model.' + ref_model + '.read',
                         'params': [[ref_id], ['rec_name'], record.get_context()]
-                    }, record.model.session, false)[0].rec_name;
+                    }, record.model.session).done(function(result) {
+                        store_rec_name(result[0].rec_name);
+                    });
                 }
             } else if (ref_model) {
                 rec_name = '';
             } else {
                 rec_name = ref_id;
             }
-            Sao.setdefault(
-                record._values, this.name + '.', {}).rec_name = rec_name;
             record._values[this.name] = [ref_model, ref_id];
+            store_rec_name(rec_name);
         },
         get_on_change_value: function(record) {
             if ((record.group.parent_name == this.name) &&
@@ -2690,13 +2718,9 @@
 
     Sao.field.Binary = Sao.class_(Sao.field.Field, {
         _default: null,
-        _has_changed: function(previous, value) {
-            return previous != value;
-        },
         get_size: function(record) {
             var data = record._values[this.name] || 0;
-            if ((data instanceof Uint8Array) ||
-                (typeof(data) == 'string')) {
+            if (data instanceof Uint8Array) {
                 return data.length;
             }
             return data;
@@ -2704,8 +2728,7 @@
         get_data: function(record) {
             var data = record._values[this.name] || [];
             var prm = jQuery.when(data);
-            if (!(data instanceof Uint8Array) &&
-                (typeof(data) != 'string')) {
+            if (!(data instanceof Uint8Array)) {
                 if (record.id < 0) {
                     return prm;
                 }

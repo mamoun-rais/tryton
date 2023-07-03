@@ -73,7 +73,7 @@
                 var ctx = {
                     active_model: data.model || null,
                     active_id: data.id || null,
-                    active_ids: data.ids || [],
+                    active_ids: data.ids
                 };
                 ctx = jQuery.extend(ctx, session.context);
                 ctx._user = session.user_id;
@@ -82,8 +82,10 @@
                     {}, context,
                     decoder.decode( action.pyson_context || '{}'));
                 ctx = jQuery.extend(ctx, params.context);
+                // [Coog Specific] handle extra_context
+                ctx = jQuery.extend(ctx, data.extra_context || {});
 
-                ctx.context = ctx;
+                ctx.context = Sao.common.clone(ctx);
                 decoder = new Sao.PYSON.Decoder(ctx);
                 params.domain = decoder.decode(action.pyson_domain);
                 params.order = decoder.decode(action.pyson_order);
@@ -118,6 +120,9 @@
                 params.action = action.wiz_name;
                 params.data = data;
                 params.context = context;
+                // [Coog Specific] handle extra_context
+                params.context = jQuery.extend(
+                    params.context, data.extra_context || {});
                 params.window = action.window;
                 name_prm = jQuery.when(action.name);
                 if ((action.keyword || 'form_action') === 'form_action') {
@@ -161,7 +166,7 @@
             var keyact = {};
             for (var i in actions) {
                 var action = actions[i];
-                keyact[action.name.split(' / ').pop()] = action;
+                keyact[action.name.replace(/_/g, '')] = action;
             }
             var prm = Sao.common.selection(
                     Sao.i18n.gettext('Select your action'),

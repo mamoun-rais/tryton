@@ -295,8 +295,10 @@
                     'class': 'btn btn-default btn-sm',
                     'type': 'button',
                     'aria-label': Sao.i18n.gettext('New')
-                }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-create')
-                ).appendTo(buttons);
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-plus'
+                })).appendTo(buttons);
                 this.but_new.click(disable_during(this.new_.bind(this)));
                 this.but_new.prop('disabled', !access.create || readonly);
 
@@ -317,6 +319,16 @@
                 ).appendTo(buttons);
                 this.but_undel.click(disable_during(this.undelete.bind(this)));
                 this.but_undel.prop('disabled', !access['delete'] || readonly);
+
+                this.but_switch = jQuery('<button/>', {
+                    'class': 'btn btn-default btn-sm',
+                    'type': 'button',
+                    'aria-label': Sao.i18n.gettext('Switch')
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-resize-full'
+                })).appendTo(buttons);
+                this.but_switch.click(this.switch_.bind(this));
 
                 this.screen.message_callback = this.record_label.bind(this);
             }
@@ -430,10 +442,7 @@
                     this.screen.current_record) {
                 this.screen.current_record.validate().then(function(validate) {
                     if (validate && this.screen.attributes.pre_validate) {
-                        return this.screen.current_record.pre_validate().then(
-                            function () { return true; },
-                            function () { return false; }
-                        );
+                        return this.screen.current_record.pre_validate();
                     }
                     return validate;
                 }.bind(this)).then(function(validate) {
@@ -1258,7 +1267,7 @@
             }).text(el_field.attr('name')).prepend(
                 Sao.common.ICONFACTORY.get_icon_img('tryton-drag')
             ).click(function(e) {
-                if (e.ctrlKey || e.metaKey) {
+                if (e.ctrlKey) {
                     node.toggleClass('bg-primary');
                 } else {
                     jQuery(e.target).addClass('bg-primary')
@@ -1282,7 +1291,7 @@
                     'field': parent_node[field].field,
                     'name': parent_node[field].name
                 }).text(name).click(function(e) {
-                    if (e.ctrlKey || e.metaKey) {
+                    if(e.ctrlKey) {
                         node.toggleClass('bg-primary');
                     } else {
                         this.fields_all.find('li').removeClass('bg-primary');
@@ -1348,7 +1357,7 @@
             }.bind(this));
         },
         children_expand: function(node) {
-            if (jQuery.isEmptyObject(node.children) && node.relation) {
+            if (jQuery.isEmptyObject(node.children)) {
                 this.model_populate(
                     this._get_fields(node.relation), node.children,
                     node.field + '/', node.name + '/');
@@ -1418,10 +1427,9 @@
                 if (field.name == (prefix + parents[i]) ||
                     field.field == (prefix + parents[i])) {
                     this.children_expand(field);
+                    fields = field.children;
                     prefix += parents[i] + '/';
-                    if (field.children) {
-                        this._traverse(field.children, prefix, parents, ++i);
-                    }
+                    this._traverse(fields, prefix, parents, ++i);
                     break;
                 }
             }
@@ -1638,7 +1646,7 @@
                 var node = jQuery('<li/>', {
                     'path': path
                 }).text(parent_node[name].string).click(function(e) {
-                    if (e.ctrlKey || e.metaKey) {
+                    if(e.ctrlKey) {
                         node.toggleClass('bg-primary');
                     } else {
                         this.fields_all.find('li')
@@ -1724,7 +1732,7 @@
             }.bind(this));
         },
         children_expand: function(node) {
-            if (jQuery.isEmptyObject(node.children) && node.relation) {
+            if (jQuery.isEmptyObject(node.children)) {
                 this.model_populate(
                     this._get_fields(node.relation), node.children,
                     node.path + '/', node.long_string + '/');
@@ -1869,10 +1877,9 @@
                 field = fields[names[item]];
                 if (field.path == (prefix + parents[i])) {
                     this.children_expand(field);
+                    fields = field.children;
                     prefix += parents[i] + '/';
-                    if (field.children) {
-                        this._traverse(field.children, prefix, parents, ++i);
-                    }
+                    this._traverse(fields, prefix, parents, ++i);
                     break;
                 }
             }
@@ -1887,7 +1894,7 @@
                 'path': name,
                 'class': 'draggable-handle',
             }).text(long_string).click(function(e) {
-                if (e.ctrlKey || e.metaKey) {
+                if(e.ctrlKey) {
                     node.toggleClass('bg-primary');
                 } else {
                     jQuery(e.target).addClass('bg-primary')
@@ -1994,8 +2001,7 @@
             } else {
                 domain = this.screen.search_domain(
                     this.screen.screen_container.get_text());
-                if (!this.ignore_search_limit.prop('checked') &&
-                    this.screen.limit !== null) {
+                if (!this.ignore_search_limit.prop('checked')) {
                     query_string.push(['s', this.screen.limit.toString()]);
                     query_string.push(
                         ['p', Math.floor(
@@ -2059,10 +2065,7 @@
                         val, {'s': 1, 'm': 60, 'h': 60 * 60});
                 } else if (!isNaN(Number(val))) {
                     val = val.toLocaleString(
-                        Sao.i18n.BC47(Sao.i18n.getlang()), {
-                            'minimumFractionDigits': 0,
-                            'maximumFractionDigits': 20,
-                        });
+                        Sao.i18n.BC47(Sao.i18n.getlang()));
                 }
             } else if (val.isTimeDelta) {
                 val = val.asSeconds();
