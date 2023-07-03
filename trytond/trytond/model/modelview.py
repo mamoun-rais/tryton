@@ -12,8 +12,10 @@ from trytond.tools import ClassProperty, is_instance_method
 from trytond.pyson import PYSONDecoder, PYSONEncoder
 from trytond.transaction import Transaction
 from trytond.cache import Cache
+from trytond.config import config
 from trytond.pool import Pool
 from trytond.rpc import RPC
+from trytond.server_context import ServerContext
 
 from .fields import on_change_result
 
@@ -355,7 +357,28 @@ class ModelView(Model):
         result['arch'] = xarch
         result['fields'] = xfields
 
-        cls._fields_view_get_cache.set(key, result)
+        if result['field_childs']:
+            child_field = result['field_childs']
+            result['children_definitions'] = defs = {}
+            model = cls
+            requisite_fields = list(result['fields'].keys())
+            requisite_fields.remove(child_field)
+            while model and model.__name__ not in defs:
+                fields_to_get = [rfield for rfield in requisite_fields
+                    if hasattr(model, rfield)]
+                defs[model.__name__] = model.fields_get(fields_to_get
+                    + [child_field])
+                field = getattr(model, child_field, None)
+                if field:
+                    model = pool.get(field.model_name)
+                else:
+                    model = None
+        else:
+            result['children_definitions'] = {}
+
+        if not config.getboolean('cache', 'disable_fields_view_get_cache',
+                default=False):
+            cls._fields_view_get_cache.set(key, result)
         return result
 
     @classmethod
@@ -378,6 +401,7 @@ class ModelView(Model):
         prints = Action.get_keyword('form_print', (cls.__name__, -1))
         actions = Action.get_keyword('form_action', (cls.__name__, -1))
         relates = Action.get_keyword('form_relate', (cls.__name__, -1))
+        quick_actions = Action.get_keyword('form_toolbar', (cls.__name__, -1))
         exports = Export.search_read(
             [('resource', '=', cls.__name__)],
             fields_names=['name', 'export_fields.name'])
@@ -385,6 +409,7 @@ class ModelView(Model):
             'print': prints,
             'action': actions,
             'relate': relates,
+            'quick_actions': quick_actions,
             'exports': exports,
             }
         cls._view_toolbar_get_cache.set(key, result)
@@ -569,15 +594,22 @@ class ModelView(Model):
                 view_ids = set_view_ids(element)
                 if type != 'form':
                     continue
+                # Coog Spec : Ignore fields which are not in the view, to allow
+                # dynamic sub_fields for Dict fields
+                if fname not in cls._fields:
+                    continue
                 field = cls._fields[fname]
                 relation = get_relation(field)
+                if element.get('relation'):
+                    relation = element.get('relation')
                 if not relation:
                     continue
                 mode = (
                     element.attrib.pop('mode', None) or 'tree,form').split(',')
                 views = get_views(relation, view_ids, mode)
                 element.attrib['mode'] = ','.join(mode)
-                fields_attrs[fname].setdefault('views', {}).update(views)
+                if not element.get('relation'):
+                    fields_attrs[fname].setdefault('views', {}).update(views)
 
             if type == 'tree' and element.get('name') in fields_width:
                 element.set('width', str(fields_width[element.get('name')]))
@@ -765,9 +797,13 @@ class ModelView(Model):
             if field._type in ('many2one', 'one2one', 'reference'):
                 if value:
                     if isinstance(value, ModelStorage):
-                        changed['%s.' % fname] = {
-                            'rec_name': value.rec_name,
-                            }
+                        try:
+                            rec_name = value.rec_name
+                            changed['%s.' % fname] = {
+                                'rec_name': rec_name,
+                                }
+                        except AttributeError:
+                            pass
                     if value.id is None:
                         # Don't consider temporary instance as a change
                         continue
@@ -789,18 +825,23 @@ class ModelView(Model):
                                 target_changed['id'] = target.id
                                 value['update'].append(target_changed)
                     else:
-                        if isinstance(target, ModelView):
-                            # Ensure initial values are returned because target
-                            # was instantiated on server side.
-                            target_init_values = target._init_values
-                            target._init_values = None
-                            try:
-                                added_values = target._changed_values
-                            finally:
-                                target._init_values = target_init_values
-                        else:
-                            added_values = target._default_values
-                        value['add'].append((i, added_values))
+                        # JACK: redmine issue #5873
+                        # automatically get a one2Many rec_name
+                        # to limit number of requests
+                        with ServerContext().set_context(
+                                _default_rec_names=True):
+                            if isinstance(target, ModelView):
+                                # Ensure initial values are returned because target
+                                # was instantiated on server side.
+                                target_init_values = target._init_values
+                                target._init_values = None
+                                try:
+                                    added_values = target._changed_values
+                                finally:
+                                    target._init_values = target_init_values
+                            else:
+                                added_values = target._default_values
+                            value['add'].append((i, added_values))
                 if not value['remove']:
                     del value['remove']
                 if not value:

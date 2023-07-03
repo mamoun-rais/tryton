@@ -5,6 +5,8 @@ import configparser
 import urllib.parse
 import logging
 
+import six
+
 __all__ = ['config', 'get_hostname', 'get_port', 'split_netloc',
     'parse_listen', 'parse_uri']
 logger = logging.getLogger(__name__)
@@ -40,10 +42,17 @@ def parse_uri(uri):
 class TrytonConfigParser(configparser.RawConfigParser):
 
     def __init__(self):
-        configparser.RawConfigParser.__init__(self)
+        # AKE
+        if six.PY2:
+            configparser.RawConfigParser.__init__(self)
+        else:
+            configparser.RawConfigParser.__init__(self, strict=False)
         self.add_section('web')
         self.set('web', 'listen', 'localhost:8000')
-        self.set('web', 'root', os.path.join(os.path.expanduser('~'), 'www'))
+        # AKE: web apps from env vars
+        self.set('web', 'root', os.environ.get('TRYTOND_WEB_ROOT',
+                os.path.join(os.path.expanduser('~'), 'www')))
+        self.set('web', 'bench', os.environ.get('TRYTOND_WEB_BENCH', None))
         self.set('web', 'num_proxies', 0)
         self.set('web', 'cache_timeout', 60 * 60 * 12)
         self.add_section('database')
@@ -62,6 +71,15 @@ class TrytonConfigParser(configparser.RawConfigParser):
         self.set('cache', 'model', 200)
         self.set('cache', 'record', 2000)
         self.set('cache', 'field', 100)
+
+        # AKE: cache config from env vars
+        self.set('cache', 'class', os.environ.get('TRYTOND_CACHE_CLASS', None))
+        self.set('cache', 'uri', os.environ.get('TRYTOND_CACHE_URI', None))
+        self.set('cache', 'coog_cache_size', 1024)
+
+        self.add_section('report')
+        self.set('report', 'unoconv_retry', 2)
+
         self.add_section('queue')
         self.set('queue', 'worker', False)
         self.add_section('ssl')
@@ -79,6 +97,11 @@ class TrytonConfigParser(configparser.RawConfigParser):
         self.set('password', 'length', 8)
         self.set('password', 'entropy', 0.75)
         self.set('password', 'reset_timeout', 24 * 60 * 60)
+
+        # AKE: sentry config from env vars
+        self.add_section('sentry')
+        self.set('sentry', 'dsn', os.environ.get('TRYTOND_SENTRY_DSN', None))
+
         self.add_section('bus')
         self.set('bus', 'allow_subscribe', False)
         self.set('bus', 'long_polling_timeout', 5 * 60)

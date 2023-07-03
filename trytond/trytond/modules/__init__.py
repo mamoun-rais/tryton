@@ -12,6 +12,7 @@ from importlib.machinery import FileFinder, SourceFileLoader, SOURCE_SUFFIXES
 
 from sql import Table
 from sql.functions import CurrentTimestamp
+from sql.aggregate import Count
 
 import trytond.tools as tools
 from trytond.cache import Cache
@@ -32,6 +33,9 @@ MODULES_PATH = os.path.abspath(os.path.dirname(__file__))
 MODULES = []
 
 EGG_MODULES = {}
+
+#PKUNK 9502 Add auto_uninstall
+AUTO_UNINSTALL = os.environ.get('COOG_AUTO_UNINSTALL')
 
 
 def update_egg_modules():
@@ -79,7 +83,6 @@ def import_module(name, fullname=None):
         else:
             raise
     return module
-
 
 
 def get_module_info(name):
@@ -202,6 +205,7 @@ def load_module_graph(graph, pool, update=None, lang=None):
             classes = pool.fill(module, modules)
             if update:
                 pool.setup(classes)
+                pool.post_init(module)
             package_state = module2state.get(module, 'not activated')
             if (is_module_to_install(module, update)
                     or (update
@@ -280,6 +284,8 @@ def load_module_graph(graph, pool, update=None, lang=None):
             ModelField = pool.get('ir.model.field')
             ModelField.clean()
             transaction.commit()
+        # JCA: Add update parameter to post init hooks
+        pool.post_init(None)
 
         pool.setup_mixin(modules)
 
@@ -307,7 +313,7 @@ def get_module_list():
             if os.path.isdir(OPJ(MODULES_PATH, file)):
                 module_list.add(file)
     update_egg_modules()
-    module_list.update(EGG_MODULES.keys())
+    module_list.update(list(EGG_MODULES.keys()))
     module_list.add('ir')
     module_list.add('res')
     module_list.add('tests')
@@ -348,6 +354,124 @@ def load_modules(
     else:
         update = []
 
+    def migrate_modules(cursor):
+        modules_in_dir = get_module_list()
+        modules_to_migrate = {}
+        for module_dir in modules_in_dir:
+            try:
+                with tools.file_open(
+                        OPJ(module_dir, '__migrated_modules')) as f:
+                    for line in f.readlines():
+                        line = line.replace(' ', '').strip('\n')
+                        if not line:
+                            continue
+                        action, old_module = line.split(':')
+                        modules_to_migrate[old_module] = (action, module_dir)
+            except IOError:
+                continue
+
+        cursor.execute(*ir_module.select(ir_module.name))
+        for module_in_db, in cursor.fetchall():
+            if (module_in_db in modules_in_dir
+                    or module_in_db in modules_to_migrate):
+                continue
+            else:
+                modules_to_migrate[module_in_db] = ('to_drop', None)
+
+        # PKUNK 9502 add logs and control before uninstall modules
+        if (not AUTO_UNINSTALL):
+            dropped = False
+            for module in modules_to_migrate:
+                if modules_to_migrate[module][0] == 'to_drop':
+                    logger.critical('To uninstall %s you should set'
+                        ' COOG_AUTO_UNINSTALL environnement variable' % module)
+                    dropped = True
+            if dropped:
+                sys.exit(1)
+        else:
+            for module in modules_to_migrate:
+                if modules_to_migrate[module][0] == 'to_drop':
+                    logger.warning('%s is about to be uninstalled' % (module))
+        # PKUNK 9502 end
+
+        def rename(cursor, table_name, old_name, new_name, var_name):
+            table = Table(table_name)
+            fields = None
+            # If the view already exists in destination module
+            if table_name == 'ir_model_data':
+                fields = ['fs_id', 'model']
+            if table_name == 'ir_ui_view':
+                fields = ['model', 'name']
+            if fields:
+                query = ('DELETE from %(table)s where '
+                    '(%(fields)s) in ('
+                        'SELECT %(fields)s FROM %(table)s WHERE '
+                        '"module" IN (\'%(old_name)s\', \'%(new_name)s\') '
+                        'GROUP BY %(fields)s '
+                        'HAVING COUNT("module") > 1) '
+                    'and "module" = \'%(old_name)s\';' % {
+                        'table': table_name,
+                        'old_name': old_name,
+                        'new_name': new_name,
+                        'fields': (', '.join('"' + f + '"' for f in fields))})
+                cursor.execute(query)
+
+            query = table.update([getattr(table, var_name)],
+                    [new_name],
+                    where=(getattr(table, var_name) == old_name))
+            cursor.execute(*query)
+
+        def delete(cursor, table_name, old_name, var_name):
+            table = Table(table_name)
+            cursor.execute(*table.delete(
+                    where=(getattr(table, var_name) == old_name)))
+
+        for old_name, (action, new_name) in modules_to_migrate.items():
+            cursor.execute(*ir_module.select(Count(ir_module.id),
+                    where=ir_module.name == old_name))
+            count, = cursor.fetchone()
+            if not count:
+                continue
+
+            if action == 'to_drop':
+                logger.info('%s directory has been removed from filesystem,'
+                    ' deleting entries from database...' % old_name)
+            else:
+                logger.info('%s has been %s %s, updating database...' % (
+                    old_name, {'to_rename': 'renamed into',
+                        'to_merge': 'merged with'}[action], new_name))
+            if new_name:
+                rename(cursor, 'ir_model', old_name, new_name, 'module')
+                rename(cursor, 'ir_action_report', old_name, new_name,
+                    'module')
+                rename(cursor, 'ir_model_field', old_name, new_name, 'module')
+                rename(cursor, 'ir_model_data', old_name, new_name, 'module')
+                rename(cursor, 'ir_translation', old_name, new_name, 'module')
+                rename(cursor, 'ir_translation', old_name, new_name,
+                    'overriding_module')
+                rename(cursor, 'ir_ui_icon', old_name, new_name, 'module')
+                rename(cursor, 'ir_ui_view', old_name, new_name, 'module')
+
+            if action == 'to_rename':
+                rename(cursor, 'ir_module_dependency', old_name, new_name,
+                    'name')
+                rename(cursor, 'ir_module', old_name, new_name, 'name')
+            elif action == 'to_merge':
+                delete(cursor, 'ir_module_dependency', old_name,
+                    'name')
+                delete(cursor, 'ir_module', old_name, 'name')
+            elif action == 'to_drop':
+                delete(cursor, 'ir_model', old_name, 'module')
+                delete(cursor, 'ir_action_report', old_name, 'module')
+                delete(cursor, 'ir_model_field', old_name, 'module')
+                delete(cursor, 'ir_model_data', old_name, 'module')
+                delete(cursor, 'ir_translation', old_name, 'module')
+                delete(cursor, 'ir_translation', old_name, 'overriding_module')
+                delete(cursor, 'ir_ui_icon', old_name, 'module')
+                delete(cursor, 'ir_ui_view', old_name, 'module')
+                delete(cursor, 'ir_module_dependency', old_name, 'name')
+                delete(cursor, 'ir_module', old_name, 'name')
+
     def _load_modules(update):
         global res
         TableHandler = backend.get('TableHandler')
@@ -372,6 +496,8 @@ def load_modules(
                         where=ir_module.state == 'uninstalled'))
 
             if update:
+                migrate_modules(cursor)
+
                 cursor.execute(*ir_module.select(ir_module.name,
                         where=ir_module.state.in_(('activated', 'to activate',
                                 'to upgrade', 'to remove'))))

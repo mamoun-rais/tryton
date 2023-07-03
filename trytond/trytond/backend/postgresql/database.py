@@ -39,6 +39,11 @@ from trytond.config import config, parse_uri
 from trytond.protocols.jsonrpc import JSONDecoder
 from trytond.tools.gevent import is_gevent_monkey_patched
 
+# MAB: Performance analyser tools (See [ec1462afd])
+from trytond.perf_analyzer import analyze_before, analyze_after
+from trytond.perf_analyzer import logger as perf_logger
+
+
 __all__ = ['Database', 'DatabaseIntegrityError', 'DatabaseOperationalError']
 
 logger = logging.getLogger(__name__)
@@ -66,6 +71,38 @@ class LoggingCursor(cursor):
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(self.mogrify(sql, args))
         cursor.execute(self, sql, args)
+
+
+class PerfCursor(cursor):
+    def execute(self, query, vars=None):
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(self.mogrify(query, vars))
+        try:
+            context = analyze_before(self)
+        except:
+            perf_logger.exception('analyse_before failed')
+            context = None
+        ret = super(PerfCursor, self).execute(query, vars)
+        if context is not None:
+            try:
+                analyze_after(*context)
+            except:
+                perf_logger.exception('analyse_after failed')
+        return ret
+
+    def callproc(self, procname, vars=None):
+        try:
+            context = analyze_before(self)
+        except:
+            perf_logger.exception('analyse_before failed')
+            context = None
+        ret = super(PerfCursor, self).callproc(procname, vars)
+        if context is not None:
+            try:
+                analyze_after(*context)
+            except:
+                perf_logger.exception('analyse_after failed')
+        return ret
 
 
 class Unaccent(Function):
@@ -148,7 +185,7 @@ class Database(DatabaseInterface):
                 logger.info('connect to "%s"', name)
                 inst._connpool = ThreadedConnectionPool(
                     minconn, _maxconn, **cls._connection_params(name),
-                    cursor_factory=LoggingCursor)
+                    cursor_factory=PerfCursor)
                 databases[name] = inst
             inst._last_use = datetime.now()
             return inst
@@ -172,6 +209,11 @@ class Database(DatabaseInterface):
             params['port'] = uri.port
         return params
 
+    def _kill_session_query(self, database_name):
+        return 'SELECT pg_terminate_backend(pg_stat_activity.pid) ' \
+            'FROM pg_stat_activity WHERE pg_stat_activity.datname = \'%s\'' \
+            ' AND pid <> pg_backend_pid();' % database_name
+
     def connect(self):
         return self
 
@@ -193,6 +235,7 @@ class Database(DatabaseInterface):
         if readonly:
             cursor = conn.cursor()
             cursor.execute('SET TRANSACTION READ ONLY')
+        conn.cursor_factory = PerfCursor
         return conn
 
     def put_connection(self, connection, close=False):

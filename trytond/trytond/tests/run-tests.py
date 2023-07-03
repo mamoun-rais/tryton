@@ -4,12 +4,13 @@
 import logging
 import argparse
 import os
-import time
+import uuid
 import unittest
+import xmlrunner
 import sys
+import time
 
 from trytond.config import config
-from trytond import backend
 
 if __name__ != '__main__':
     raise ImportError('%s can not be imported' % __name__)
@@ -26,6 +27,8 @@ parser.add_argument("--no-doctest", action="store_false", dest="doctest",
     default=True, help="Don't run doctest")
 parser.add_argument("-v", action="count", default=0, dest="verbosity",
     help="Increase verbosity")
+parser.add_argument("-x", "--xmloutput", action="store_true",
+    default=False, dest="xmloutput", help="Generate XML files")
 parser.add_argument('tests', metavar='test', nargs='*')
 parser.epilog = ('The database name can be specified in the DB_NAME '
     'environment variable.\n'
@@ -35,10 +38,12 @@ opt = parser.parse_args()
 
 config.update_etc(opt.config)
 
+# Import after application is configured
+from trytond import backend
 if backend.name() == 'sqlite':
     database_name = ':memory:'
 else:
-    database_name = 'test_' + str(int(time.time()))
+    database_name = 'test_' + str(uuid.uuid4().int)
 os.environ.setdefault('DB_NAME', database_name)
 
 from trytond.tests.test_tryton import all_suite, modules_suite
@@ -46,6 +51,12 @@ if not opt.modules:
     suite = all_suite(opt.tests)
 else:
     suite = modules_suite(opt.tests, doc=opt.doctest)
-result = unittest.TextTestRunner(
-    verbosity=opt.verbosity, failfast=opt.failfast).run(suite)
+
+if not opt.xmloutput:
+    result = unittest.TextTestRunner(
+        verbosity=opt.verbosity, failfast=opt.failfast).run(suite)
+else:
+    result = xmlrunner.XMLTestRunner(
+        output='test-reports', outsuffix=str(time.time()),
+        verbosity=opt.verbosity).run(suite)
 sys.exit(not result.wasSuccessful())

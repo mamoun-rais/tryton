@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from collections import defaultdict
 from io import BytesIO
 from lxml import etree
+import logging
 
 import polib
 from sql import Column, Null, Literal
@@ -30,6 +31,8 @@ from ..cache import Cache
 from ..config import config
 
 from trytond.ir.lang import get_parent_language as get_parent
+
+logger = logging.getLogger(name='trytond.translator')
 
 __all__ = ['Translation',
     'TranslationSetStart', 'TranslationSetSucceed', 'TranslationSet',
@@ -690,6 +693,9 @@ class Translation(ModelSQL, ModelView):
 
         def override_translation(ressource_id, new_translation):
             res_id_module, res_id = ressource_id.split('.')
+            # AKE: logging for debug
+            logger.debug('Overriding translation of %s (%s)' % (res_id_module,
+                    new_translation.name))
             if res_id:
                 model_data, = ModelData.search([
                         ('module', '=', res_id_module),
@@ -709,8 +715,19 @@ class Translation(ModelSQL, ModelView):
                 if new_translation.type in {
                         'report', 'view', 'wizard_button', 'selection'}:
                     domain.append(('src', '=', new_translation.src))
-                translation, = cls.search(domain)
-                if translation.value != new_translation.value:
+                # AKE: avoir crash when no transalation
+                found = cls.search(domain)
+                if found:
+                    translation, = found
+                else:
+                    translation = None
+                    logger.warning('Impossible to find translation %s'
+                        ' from module %s for lang %s' % (
+                            new_translation.name,
+                            res_id_module,
+                            new_translation.lang,
+                            ))
+                if translation and translation.value != new_translation.value:
                     translation.value = new_translation.value
                     translation.overriding_module = module
                     translation.fuzzy = new_translation.fuzzy
@@ -781,7 +798,14 @@ class Translation(ModelSQL, ModelView):
                                 to_save.append(old_translation)
                             else:
                                 translations.add(old_translation)
-        cls.save([_f for _f in to_save if _f])
+        # JCA : Add try catch to help with debugging
+        try:
+            cls.save([_f for _f in to_save if _f])
+        except:
+            logger.debug('Failed to save translations')
+            for data in to_save:
+                logging.getLogger().debug('    ' + str(data._save_values))
+            raise
         translations |= set(to_save)
 
         if translations:

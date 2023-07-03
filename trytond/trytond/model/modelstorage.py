@@ -4,6 +4,7 @@
 import datetime
 import time
 import csv
+import logging
 
 from decimal import Decimal
 from itertools import islice, chain
@@ -28,6 +29,8 @@ from .modelview import ModelView
 from .descriptors import dualmethod
 
 __all__ = ['ModelStorage', 'EvalEnvironment']
+_cache_record = config.getint('cache', 'record')
+_cache_field = config.getint('cache', 'field')
 
 
 class AccessError(UserError):
@@ -75,8 +78,7 @@ def without_check_access(func):
 
 
 def cache_size():
-    return Transaction().context.get('_record_cache_size',
-        config.getint('cache', 'record'))
+    return Transaction().context.get('_record_cache_size', _cache_record)
 
 
 def is_leaf(expression):
@@ -287,7 +289,8 @@ class ModelStorage(Model):
 
         # Clean transaction cache
         for cache in list(Transaction().cache.values()):
-            for cache in (cache, list(cache.get('_language_cache', {}).values())):
+            for cache in (cache,
+                    list(cache.get('_language_cache', {}).values())):
                 if cls.__name__ in cache:
                     for record in records:
                         if record.id in cache[cls.__name__]:
@@ -1164,6 +1167,10 @@ class ModelStorage(Model):
                                 and not value)
                             or (field._type == 'reference'
                                 and not isinstance(value, ModelStorage))):
+                        # JCA : Add log to help debugging
+                        logging.getLogger().debug(
+                            'Field %s of %s is required' %
+                            (field_name, cls.__name__))
                         raise RequiredValidationError(
                             gettext('ir.msg_required_validation_record',
                                 **cls.__names__(field_name)))
@@ -1271,12 +1278,19 @@ class ModelStorage(Model):
                                 test = sel_func()
                             else:
                                 test = sel_func(record)
-                            test = set(dict(test))
+                            try:
+                                test = set(dict(test))
+                            except:
+                                raise Exception((test, field_name, cls))
                         # None and '' are equivalent
                         if '' in test or None in test:
                             test.add('')
                             test.add(None)
                         if value not in test:
+                            # JCA : Add log to help debugging
+                            logging.getLogger().debug('Bad Selection : field '
+                                    '%s of model %s : %s is not in %s' % (
+                                        field_name, cls.__name__, value, test))
                             error_args = cls.__names__(field_name)
                             error_args['value'] = value
                             raise SelectionValidationError(
@@ -1325,7 +1339,7 @@ class ModelStorage(Model):
     def _clean_defaults(cls, defaults):
         pool = Pool()
         vals = {}
-        for field in defaults.keys():
+        for field in list(defaults.keys()):
             if '.' in field:  # skip all related fields
                 continue
             fld_def = cls._fields[field]
@@ -1423,8 +1437,6 @@ class ModelStorage(Model):
             to_remove = set(x for x, y in fread_accesses.items()
                     if not y and x != name)
 
-            threshold = config.getint('cache', 'field')
-
             def not_cached(item):
                 fname, field = item
                 return (fname not in self._cache.get(self.id, {})
@@ -1442,7 +1454,7 @@ class ModelStorage(Model):
             ifields = filter(to_load,
                 filter(not_cached,
                     iter(self._fields.items())))
-            ifields = islice(ifields, 0, threshold)
+            ifields = islice(ifields, 0, _cache_field)
             ffields.update(ifields)
 
         require_context_field = False
@@ -1484,7 +1496,9 @@ class ModelStorage(Model):
 
         def instantiate(field, value, data):
             if field._type in ('many2one', 'one2one', 'reference'):
-                if value is None or value is False:
+                # ABDC: Fix when data is an empty string, we should return
+                # None
+                if value is None or value is False or value == '':
                     return None
             elif field._type in ('one2many', 'many2many'):
                 if not value:
@@ -1609,7 +1623,9 @@ class ModelStorage(Model):
                     if target.id is None or target.id < 0:
                         if field._type == 'one2many' and field.field:
                             # Don't store old target link
-                            setattr(target, field.field, None)
+                            if field.field:
+                                # JCA : Ignore if Function field
+                                setattr(target, field.field, None)
                         to_create.append(target._save_values)
                     else:
                         if target.id in to_remove:
@@ -1650,12 +1666,12 @@ class ModelStorage(Model):
                         or context != record._context):
                     latter.append(record)
                     continue
-                save_values[record] = record._save_values
-                values[record] = record._values
+                save_values[id(record)] = record._save_values
+                values[id(record)] = record._values
                 record._values = None
                 if record.id is None or record.id < 0:
                     to_create.append(record)
-                elif save_values[record]:
+                elif save_values[id(record)]:
                     to_write.append(record)
             transaction = Transaction()
             try:
@@ -1664,17 +1680,20 @@ class ModelStorage(Model):
                         transaction.reset_context(), \
                         transaction.set_context(context):
                     if to_create:
-                        news = cls.create([save_values[r] for r in to_create])
+                        # ABE: use records addresses as keys instead of records
+                        news = cls.create(
+                            [save_values[id(r)] for r in to_create])
                         for record, new in zip(to_create, news):
                             record._ids.remove(record.id)
                             record._id = new.id
                             record._ids.append(record.id)
                     if to_write:
                         cls.write(*sum(
-                                (([r], save_values[r]) for r in to_write), ()))
+                                (([r], save_values[id(r)]) for r in to_write),
+                                ()))
             except:
                 for record in to_create + to_write:
-                    record._values = values[record]
+                    record._values = values[id(record)]
                 raise
             for record in to_create + to_write:
                 record._init_values = None

@@ -391,6 +391,7 @@ Class methods:
 
     Return a SQL Table instance for the history of Model.
 
+
 .. classmethod:: ModelSQL.__table_handler__([module_name[, history]])
 
     Return a TableHandler for the Model.
@@ -615,6 +616,11 @@ Class attributes are:
 
     The definition of the :class:`trytond.model.fields.Char` field for the
     string of the key.
+
+.. attribute:: DictSchemaMixin.help
+
+    The definition of the :class:`trytond.model.fields.Char` field for the help
+    of the key.
 
 .. attribute:: DictSchemaMixin.type\_
 

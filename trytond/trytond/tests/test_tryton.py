@@ -24,6 +24,8 @@ from trytond.pool import Pool, isregisteredby
 from trytond import backend
 from trytond.model import Workflow, ModelSQL, ModelSingleton, ModelView, fields
 from trytond.model.fields import get_eval_fields, Function
+from trytond.model.fields.selection import TranslatedSelection
+from trytond.model.fields.dict import TranslatedDict
 from trytond.tools import is_instance_method
 from trytond.transaction import Transaction
 from trytond.cache import Cache
@@ -44,13 +46,13 @@ DB_CACHE = os.environ.get('DB_CACHE')
 Pool.test = True
 
 
-def activate_module(modules):
+def activate_module(modules, cache_name=None):
     '''
     Activate modules for the tested database
     '''
     if isinstance(modules, str):
         modules = [modules]
-    name = '-'.join(modules)
+    name = cache_name or '-'.join(modules)
     if not db_exist(DB_NAME) and restore_db_cache(name):
         return
     create_db()
@@ -111,7 +113,7 @@ def backup_db_cache(name):
 
 
 def _db_cache_file(path, name, backend_name):
-    return os.path.join(path, '%s-%s.dump' % (name, backend_name))
+    return os.path.join(path, 'test_%s_cache_%s.dump' % (backend_name, name))
 
 
 def _sqlite_copy(file_, restore=False):
@@ -189,6 +191,8 @@ def _pg_dump(cache_file):
             transaction.database.create(
                 transaction.connection, cache_name, DB_NAME)
         open(cache_file, 'a').close()
+        if DB_NAME in Cache._listener:
+            del Cache._listener[DB_NAME]
         return True
 
 
@@ -213,6 +217,7 @@ class ModuleTestCase(unittest.TestCase):
     'Trytond Test Case'
     module = None
     extras = None
+    cache_name = None
 
     @classmethod
     def setUpClass(cls):
@@ -220,7 +225,7 @@ class ModuleTestCase(unittest.TestCase):
         modules = [cls.module]
         if cls.extras:
             modules.extend(cls.extras)
-        activate_module(modules)
+        activate_module(modules, cache_name=cls.cache_name)
         super(ModuleTestCase, cls).setUpClass()
 
     @classmethod
@@ -366,6 +371,9 @@ class ModuleTestCase(unittest.TestCase):
 
                     # Skip if it is a field
                     if attr in model._fields:
+                        continue
+                    if isinstance(getattr(model, attr), (TranslatedSelection,
+                            TranslatedDict)):
                         continue
                     fnames = [attr[len(prefix):] for prefix in prefixes
                         if attr.startswith(prefix)]
@@ -684,12 +692,14 @@ def drop_db(name=DB_NAME):
         Database = backend.get('Database')
         database = Database(name)
         database.close()
+        if name in Cache._listener:
+            del Cache._listener[name]
 
         with Transaction().start(
                 None, 0, close=True, autocommit=True) as transaction:
+            Cache.drop(name)
             database.drop(transaction.connection, name)
             Pool.stop(name)
-            Cache.drop(name)
 
 
 def drop_create(name=DB_NAME, lang='en'):

@@ -112,7 +112,9 @@ def depends(*fields, **kwargs):
 
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            for field in fields:
+            # JMO : work around BUG#8723
+            method_depends = getattr(func, 'depends', set())
+            for field in (set(fields) | method_depends):
                 _set_value(self, field)
             return func(self, *args, **kwargs)
         return wrapper
@@ -426,6 +428,7 @@ class Field(object):
             'context': encoder.encode(self.context),
             'loading': self.loading,
             'name': self.name,
+            'depends': self.depends,
             'on_change': list(self.on_change),
             'on_change_with': list(self.on_change_with),
             'readonly': self.readonly,

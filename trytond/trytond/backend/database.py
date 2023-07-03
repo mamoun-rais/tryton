@@ -21,6 +21,9 @@ class DatabaseInterface(object):
     def __init__(self, name=''):
         self.name = name
 
+    def _kill_session_query(self, database_name):
+        raise NotImplementedError
+
     def connect(self):
         '''
         Connect to the database

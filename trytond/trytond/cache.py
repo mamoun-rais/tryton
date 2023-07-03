@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 import logging
+import os
 import select
 import threading
 from collections import OrderedDict, defaultdict
@@ -17,10 +18,13 @@ from trytond import backend
 from trytond.config import config
 from trytond.transaction import Transaction
 from trytond.tools import resolve, grouped_slice
+from trytond.cache_serializer import pack, unpack
+
 
 __all__ = ['BaseCache', 'Cache', 'LRUDict']
 _clear_timeout = config.getint('cache', 'clean_timeout', default=5 * 60)
 logger = logging.getLogger(__name__)
+show_debug_logs = logger.isEnabledFor(logging.DEBUG)
 
 
 def _cast(column):
@@ -99,7 +103,7 @@ class MemoryCache(BaseCache):
     _clean_last = datetime.now()
     _default_lower = Transaction.monotonic_time()
     _listener = {}
-    _listener_lock = threading.Lock()
+    _listener_lock = defaultdict(threading.Lock)
     _table = 'ir_cache'
     _channel = _table
 
@@ -134,7 +138,8 @@ class MemoryCache(BaseCache):
                 return default
             cache[key] = (expire, result)
             return result
-        except (KeyError, TypeError):
+        # JCA: Properly crash on type error
+        except KeyError:
             return default
 
     def set(self, key, value):
@@ -144,10 +149,14 @@ class MemoryCache(BaseCache):
             expire = dt.datetime.now() + self.duration
         else:
             expire = None
-        try:
-            cache[key] = (expire, value)
-        except TypeError:
-            pass
+
+        # JCA: Log cases where the cache size is exceeded
+        if show_debug_logs:
+            if len(cache) >= cache.size_limit:
+                logger.debug('Cache limit exceeded for %s' % self._name)
+
+        cache[key] = (expire, value)
+        # JCA: Properly crash on type error
         return value
 
     def clear(self):
@@ -168,9 +177,10 @@ class MemoryCache(BaseCache):
         database = transaction.database
         dbname = database.name
         if not _clear_timeout and database.has_channel():
-            with cls._listener_lock:
-                if dbname not in cls._listener:
-                    cls._listener[dbname] = listener = threading.Thread(
+            pid = os.getpid()
+            with cls._listener_lock[pid]:
+                if (pid, dbname) not in cls._listener:
+                    cls._listener[pid, dbname] = listener = threading.Thread(
                         target=cls._listen, args=(dbname,), daemon=True)
                     listener.start()
             return
@@ -200,7 +210,7 @@ class MemoryCache(BaseCache):
     @classmethod
     def commit(cls, transaction):
         table = Table(cls._table)
-        reset = cls._reset.setdefault(transaction, set())
+        reset = cls._reset.pop(transaction, None)
         if not reset:
             return
         database = transaction.database
@@ -252,15 +262,13 @@ class MemoryCache(BaseCache):
 
     @classmethod
     def rollback(cls, transaction):
-        try:
-            cls._reset[transaction].clear()
-        except KeyError:
-            pass
+        cls._reset.pop(transaction, None)
 
     @classmethod
     def drop(cls, dbname):
-        with cls._listener_lock:
-            listener = cls._listener.pop(dbname, None)
+        pid = os.getpid()
+        with cls._listener_lock[pid]:
+            listener = cls._listener.pop((pid, dbname), None)
         if listener:
             Database = backend.get('Database')
             database = Database(dbname)
@@ -286,12 +294,14 @@ class MemoryCache(BaseCache):
 
         logger.info("listening on channel '%s' of '%s'", cls._channel, dbname)
         conn = database.get_connection()
+        pid = os.getpid()
+        current_thread = threading.current_thread()
         try:
             cursor = conn.cursor()
             cursor.execute('LISTEN "%s"' % cls._channel)
             conn.commit()
 
-            while cls._listener.get(dbname) == threading.current_thread():
+            while cls._listener.get((pid, dbname)) == current_thread:
                 readable, _, _ = select.select([conn], [], [])
                 if not readable:
                     continue
@@ -302,23 +312,46 @@ class MemoryCache(BaseCache):
                     if notification.payload:
                         reset = json.loads(notification.payload)
                         for name in reset:
-                            inst = cls._instances[name]
-                            inst._clear(dbname)
+                            # XUNG
+                            # Name not in instances when control_vesion_upgrade table is locked
+                            # because another process is currently upgrading
+                            # We must ignore cache reset notifications (Not yet loaded anyway)
+                            if name in cls._instances:
+                                inst = cls._instances[name]
+                                inst._clear(dbname)
         except Exception:
             logger.error(
                 "cache listener on '%s' crashed", dbname, exc_info=True)
             raise
         finally:
             database.put_connection(conn)
-            with cls._listener_lock:
-                if cls._listener.get(dbname) == threading.current_thread():
-                    del cls._listener[dbname]
+            with cls._listener_lock[pid]:
+                if cls._listener.get((pid, dbname)) == current_thread:
+                    del cls._listener[pid, dbname]
+
+
+class DefaultCacheValue:
+    pass
+
+
+_default_cache_value = DefaultCacheValue()
+
+
+class SerializableMemoryCache(MemoryCache):
+    def get(self, key, default=None):
+        result = super(SerializableMemoryCache, self).get(key,
+            _default_cache_value)
+        return default if result == _default_cache_value else unpack(result)
+
+    def set(self, key, value):
+        super(SerializableMemoryCache, self).set(key, pack(value))
 
 
 if config.get('cache', 'class'):
     Cache = resolve(config.get('cache', 'class'))
 else:
-    Cache = MemoryCache
+    # JCA : Use serializable memory cache by default to avoid cache corruption
+    Cache = SerializableMemoryCache
 
 
 class LRUDict(OrderedDict):

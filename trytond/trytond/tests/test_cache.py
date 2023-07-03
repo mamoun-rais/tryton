@@ -54,6 +54,9 @@ class MemoryCacheTestCase(unittest.TestCase):
         cache_mod._clear_timeout = 1
         self.addCleanup(
             setattr, cache_mod, '_clear_timeout', clear_timeout)
+        Cache = cache_mod.Cache
+        cache_mod.Cache = MemoryCache
+        self.addCleanup(setattr, cache_mod, 'Cache', Cache)
 
     def tearDown(self):
         MemoryCache.drop(DB_NAME)
@@ -136,7 +139,6 @@ class MemoryCacheTestCase(unittest.TestCase):
         self.addCleanup(transaction2.stop)
         cache.clear()
         transaction2.commit()
-        self.wait_cache_sync()
 
         # Set value from old transaction
         Transaction().set_current_transaction(transaction1)

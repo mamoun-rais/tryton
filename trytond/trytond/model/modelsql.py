@@ -277,8 +277,9 @@ class ModelSQL(ModelStorage):
                 elif ref:
                     table.add_fk(field_name, ref, field.ondelete)
 
-            table.index_action(
-                field_name, action=field.select and 'add' or 'remove')
+            # Do not remove previously set indexes
+            if field.select:
+                table.index_action(field_name, action='add')
 
             required = field.required
             # Do not set 'NOT NULL' for Binary field as the database column
@@ -723,7 +724,10 @@ class ModelSQL(ModelStorage):
             in_max = 1
             table = cls.__table_history__()
             column = Coalesce(table.write_date, table.create_date)
-            history_clause = (column <= Transaction().context['_datetime'])
+            if Transaction().context.get('_datetime_exclude', False):
+                history_clause = (column < Transaction().context['_datetime'])
+            else:
+                history_clause = (column <= Transaction().context['_datetime'])
             history_order = (column.desc, Column(table, '__id').desc)
             history_limit = 1
 
@@ -1335,6 +1339,12 @@ class ModelSQL(ModelStorage):
 
             to_delete = set()
             history = cls.__table_history__()
+            if transaction.context.get('_datetime_exclude', False):
+                history_clause = (
+                    history.write_date < transaction.context['_datetime'])
+            else:
+                history_clause = (
+                    history.write_date <= transaction.context['_datetime'])
             for sub_ids in grouped_slice([r['id'] for r in rows]):
                 where = reduce_ids(history.id, sub_ids)
                 cursor.execute(*history.select(
@@ -1343,8 +1353,7 @@ class ModelSQL(ModelStorage):
                         where=where
                         & (history.write_date != Null)
                         & (history.create_date == Null)
-                        & (history.write_date
-                            <= transaction.context['_datetime'])))
+                        & history_clause))
                 for deleted_id, delete_date in cursor.fetchall():
                     history_date, _ = ids_history[deleted_id]
                     if isinstance(history_date, str):
@@ -1431,8 +1440,11 @@ class ModelSQL(ModelStorage):
 
         if cls._history and transaction.context.get('_datetime'):
             table, _ = tables[None]
-            expression &= (Coalesce(table.write_date, table.create_date)
-                <= transaction.context['_datetime'])
+            hcolumn = Coalesce(table.write_date, table.create_date)
+            if transaction.context.get('_datetime_exclude', False):
+                expression &= (hcolumn < transaction.context['_datetime'])
+            else:
+                expression &= (hcolumn <= transaction.context['_datetime'])
         return tables, expression
 
     @classmethod
