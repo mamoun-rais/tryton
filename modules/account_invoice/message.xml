@@ -28,7 +28,7 @@ this repository contains the full copyright notices and license terms. -->
             <field name="text">You cannot modify invoice "%(invoice)s" because it is posted, paid or cancelled.</field>
         </record>
         <record model="ir.message" id="msg_invoice_same_account_line">
-            <field name="text">You cannot use the same account "%(account)s" on invoice "%(invoice)s" and on line "%(lines)s".</field>
+            <field name="text">You cannot use the same account "%(account)s" on invoice "%(invoice)s" and on line "%(line)s".</field>
         </record>
         <record model="ir.message" id="msg_invoice_delete_cancel">
             <field name="text">To delete invoice "%(invoice)s" you must cancel it.</field>
@@ -71,6 +71,12 @@ this repository contains the full copyright notices and license terms. -->
         </record>
         <record model="ir.message" id="msg_close_period_non_posted_invoices">
             <field name="text">To close the periods you must post the invoices "%(invoices)s".</field>
+        </record>
+        <record model="ir.message" id="msg_cancel_invoice_move">
+            <field name="text">The moves "%(moves)s" have the posted invoices "%(invoices)s" as origin.</field>
+        </record>
+        <record model="ir.message" id="msg_cancel_invoice_move_description">
+            <field name="text">Cancelling them will reconcile the move lines thus paying the invoices. You might want to cancel the invoices first.</field>
         </record>
     </data>
 </tryton>

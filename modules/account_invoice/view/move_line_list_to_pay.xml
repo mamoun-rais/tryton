@@ -5,5 +5,7 @@ this repository contains the full copyright notices and license terms. -->
     <field name="maturity_date"/>
     <field name="debit" sum="Debit" symbol="currency"/>
     <field name="credit" sum="Credit" symbol="currency"/>
+    <field name="delegated_amount" symbol="currency"/>
     <field name="amount_second_currency" sum="Amount Second Currency" symbol="second_currency"/>
+    <field name="reconciliation"/>
 </tree>
