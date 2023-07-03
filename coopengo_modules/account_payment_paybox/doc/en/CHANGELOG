@@ -1,0 +1,7 @@
+* FEA#22848 Remove warnings in account payment group setup because of missing configuration 
+*FEA#22865 Add configuration variable: PBX_EFFECTUE, PBX_REFUSE and PBX_ANNULE
+*FEA#14641 Add configuration variable: PBX_TYPEPAIEMENT et PBX_TYPECARTE
+*FEA#6542 Enhancements: Add security checks and searcher on the journal method of the payment group
+
+Version 1.2 - 2014-07-01
+* FEA#0000 Module Creation

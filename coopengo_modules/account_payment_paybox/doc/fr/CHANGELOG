@@ -1,0 +1,7 @@
+* FEA#22848 Suppression des warnings liés à une mise à jour de la base lors d'un défaut de configuration 
+*FEA#22865 Ajout des variables de configuration: PBX_EFFECTUE, PBX_REFUSE et PBX_ANNULE
+*FEA#14641 Ajout des variables de configuration: PBX_TYPEPAIEMENT et PBX_TYPECARTE
+*FEA#6542 Améliorations: Vérifications de sécurité et possibilité de recherche sur la méthode de journal du groupe de paiement
+
+Version 1.2 - 2014-07-01
+* FEA#0000 Création du module
