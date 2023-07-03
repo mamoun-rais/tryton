@@ -31,7 +31,8 @@ class PYSON(object):
             other = Bool(other)
         if (isinstance(self, And)
                 and not isinstance(self, Or)):
-            return And(*self._statements, other)
+            self._statements.append(other)
+            return self
         if self.types() != {bool}:
             return And(Bool(self), other)
         else:
@@ -44,7 +45,8 @@ class PYSON(object):
                 and other.types() != {bool}):
             other = Bool(other)
         if isinstance(self, Or):
-            return Or(*self._statements, other)
+            self._statements.append(other)
+            return self
         if self.types() != {bool}:
             return Or(Bool(self), other)
         else:
@@ -151,7 +153,7 @@ class Eval(PYSON):
 
     @staticmethod
     def eval(dct, context):
-        if '.' in dct['v'] and dct['v'] not in context:
+        if '.' in dct['v']:
             base, name = dct['v'].split('.', 1)
             return Eval.eval({
                     'v': name,
@@ -507,10 +509,7 @@ class In(PYSON):
 
     @staticmethod
     def eval(dct, context):
-        if dct['v']:
-            return dct['k'] in dct['v']
-        else:
-            return False
+        return dct['k'] in dct['v']
 
 
 class Date(PYSON):
