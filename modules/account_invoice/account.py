@@ -1,6 +1,8 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+from decimal import Decimal
 from collections import OrderedDict
+from itertools import islice
 
 from sql import Literal
 from sql.conditionals import Coalesce
@@ -15,6 +17,8 @@ from trytond.transaction import Transaction
 
 from trytond.modules.account.exceptions import ClosePeriodError
 from trytond.modules.company.model import CompanyValueMixin
+
+from .exceptions import CancelInvoiceMoveWarning
 
 
 class Configuration(metaclass=PoolMeta):
@@ -226,6 +230,12 @@ class Move(metaclass=PoolMeta):
     def _get_origin(cls):
         return super(Move, cls)._get_origin() + ['account.invoice']
 
+    @classmethod
+    def copy(cls, moves, default=None):
+        default = {} if default is None else default.copy()
+        default.setdefault('lines.invoice_payments', lambda data: None)
+        return super().copy(moves, default)
+
 
 class MoveLine(metaclass=PoolMeta):
     __name__ = 'account.move.line'
@@ -249,11 +259,15 @@ class MoveLine(metaclass=PoolMeta):
     invoice_payments = fields.Many2Many(
         'account.invoice-account.move.line', 'line', 'invoice',
         "Invoice Payments", readonly=True)
+    delegated_amount = fields.Function(
+        fields.Numeric("Delegated Amount to Pay"),
+        'get_delegated_amount')
 
     @classmethod
     def __setup__(cls):
         super(MoveLine, cls).__setup__()
-        cls._check_modify_exclude.add('invoice_payment')
+        cls._check_modify_exclude.update(
+            {'invoice_payment', 'invoice_payments'})
 
     @classmethod
     def _get_origin(cls):
@@ -291,6 +305,18 @@ class MoveLine(metaclass=PoolMeta):
     @classmethod
     def search_invoice_payment(cls, name, domain):
         return [('invoice_payments',) + tuple(domain[1:])]
+
+    def get_delegated_amount(self, name):
+        def final_delegated_line(line):
+            if not line.reconciliation or not line.reconciliation.delegate_to:
+                return line
+            return final_delegated_line(line.reconciliation.delegate_to)
+
+        final_delegation = final_delegated_line(self)
+        if final_delegation.reconciliation:
+            return final_delegation.amount_currency.round(0)
+        else:
+            return final_delegation.amount
 
     @property
     def product(self):
@@ -333,7 +359,8 @@ class Reconciliation(metaclass=PoolMeta):
     def create(cls, vlist):
         Invoice = Pool().get('account.invoice')
         reconciliations = super(Reconciliation, cls).create(vlist)
-        Invoice.__queue__.process(list(_invoices_to_process(reconciliations)))
+        # Invoice.__queue__.process(list(_invoices_to_process(reconciliations)))
+        Invoice.process(list(_invoices_to_process(reconciliations)))
         return reconciliations
 
     @classmethod
@@ -342,7 +369,8 @@ class Reconciliation(metaclass=PoolMeta):
 
         invoices_to_process = _invoices_to_process(reconciliations)
         super(Reconciliation, cls).delete(reconciliations)
-        Invoice.__queue__.process(list(invoices_to_process))
+        # Invoice.__queue__.process(list(invoices_to_process))
+        Invoice.process(list(invoices_to_process))
 
 
 class RenewFiscalYear(metaclass=PoolMeta):
@@ -389,12 +417,10 @@ class RenewFiscalYear(metaclass=PoolMeta):
                 sequence = getattr(invoice_sequence, field, None)
                 sequences[sequence.id] = sequence
         copies = Sequence.copy(list(sequences.values()), default={
+                'next_number': 1,
                 'name': lambda data: data['name'].replace(
                     self.start.previous_fiscalyear.name,
                     self.start.name)
-                })
-        Sequence.write(copies, {
-                'number_next': Sequence.default_number_next(),
                 })
 
         mapping = {}
@@ -412,3 +438,34 @@ class RenewFiscalYear(metaclass=PoolMeta):
         if to_write:
             InvoiceSequence.write(*to_write)
         return fiscalyear
+
+
+class CancelMoves(metaclass=PoolMeta):
+    __name__ = 'account.move.cancel'
+
+    def transition_cancel(self):
+        pool = Pool()
+        Invoice = pool.get('account.invoice')
+        Warning = pool.get('res.user.warning')
+
+        moves_w_invoices = {
+            m: m.origin for m in self.records
+            if (isinstance(m.origin, Invoice)
+                and m.origin.state not in {'paid', 'cancelled'})}
+        if moves_w_invoices:
+            move_names = ', '.join(m.rec_name
+                for m in islice(moves_w_invoices, None, 5))
+            invoice_names = ', '.join(i.rec_name
+                for i in islice(moves_w_invoices.values(), None, 5))
+            if len(moves_w_invoices) > 5:
+                move_names += '...'
+                invoice_names += '...'
+            key = Warning.format('cancel_invoice_move', moves_w_invoices)
+            if Warning.check(key):
+                raise CancelInvoiceMoveWarning(key,
+                    gettext('account_invoice.msg_cancel_invoice_move',
+                        moves=move_names, invoices=invoice_names),
+                    gettext(
+                        'account_invoice.msg_cancel_invoice_move_description'))
+
+        return super().transition_cancel()

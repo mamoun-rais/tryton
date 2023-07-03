@@ -31,19 +31,6 @@ class PaymentTerm(DeactivableMixin, ModelSQL, ModelView):
         super(PaymentTerm, cls).__setup__()
         cls._order.insert(0, ('name', 'ASC'))
 
-    @classmethod
-    def validate(cls, terms):
-        super(PaymentTerm, cls).validate(terms)
-        for term in terms:
-            term.check_remainder()
-
-    def check_remainder(self):
-        if not self.lines or not self.lines[-1].type == 'remainder':
-            raise PaymentTermValidationError(
-                gettext('account_invoice'
-                    '.msg_payment_term_missing_last_remainder',
-                    payment_term=self.rec_name))
-
     def compute(self, amount, currency, date=None):
         """Calculate payment terms and return a list of tuples
         with (date, amount) for each payment term line.
@@ -78,9 +65,7 @@ class PaymentTerm(DeactivableMixin, ModelSQL, ModelView):
                 res.append((date, Decimal(0)))
 
         if not currency.is_zero(remainder):
-            raise PaymentTermComputeError(
-                gettext('account_invoice.msg_payment_term_missing_remainder',
-                    payment_term=self.rec_name))
+            res.append((date, remainder))
         return res
 
 

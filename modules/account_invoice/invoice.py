@@ -339,59 +339,12 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
 
     @classmethod
     def __register__(cls, module_name):
-        pool = Pool()
-        Line = pool.get('account.invoice.line')
-        Tax = pool.get('account.invoice.tax')
         sql_table = cls.__table__()
-        line = Line.__table__()
-        tax = Tax.__table__()
 
         super(Invoice, cls).__register__(module_name)
         transaction = Transaction()
         cursor = transaction.connection.cursor()
         table = cls.__table_handler__(module_name)
-
-        # Migration from 3.8: remove invoice/credit note type
-        cursor.execute(*sql_table.select(sql_table.id,
-                where=sql_table.type.like('%_invoice')
-                | sql_table.type.like('%_credit_note'),
-                limit=1))
-        if cursor.fetchone():
-            for type_ in ['out', 'in']:
-                cursor.execute(*sql_table.update(
-                        columns=[sql_table.type],
-                        values=[type_],
-                        where=sql_table.type == '%s_invoice' % type_))
-                cursor.execute(*line.update(
-                        columns=[line.invoice_type],
-                        values=[type_],
-                        where=line.invoice_type == '%s_invoice' % type_))
-
-                cursor.execute(*line.update(
-                        columns=[line.quantity, line.invoice_type],
-                        values=[-line.quantity, type_],
-                        where=(line.invoice_type == '%s_credit_note' % type_)
-                        & (line.invoice == Null)
-                        ))
-                # Don't use UPDATE FROM because SQLite nor MySQL support it
-                cursor.execute(*line.update(
-                        columns=[line.quantity, line.invoice_type],
-                        values=[-line.quantity, type_],
-                        where=line.invoice.in_(sql_table.select(sql_table.id,
-                                where=(
-                                    sql_table.type == '%s_credit_note' % type_)
-                                ))))
-                cursor.execute(*tax.update(
-                        columns=[tax.base, tax.amount, tax.base_sign],
-                        values=[-tax.base, -tax.amount, -tax.base_sign],
-                        where=tax.invoice.in_(sql_table.select(sql_table.id,
-                                where=(
-                                    sql_table.type == '%s_credit_note' % type_)
-                                ))))
-                cursor.execute(*sql_table.update(
-                        columns=[sql_table.type],
-                        values=[type_],
-                        where=sql_table.type == '%s_credit_note' % type_))
 
         # Migration from 4.0: Drop not null on payment_term
         table.not_null_action('payment_term', 'remove')
@@ -436,6 +389,18 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         if self.company:
             return self.company.party.id
 
+    @fields.depends('party', 'type', 'accounting_date', 'invoice_date')
+    def on_change_with_account(self):
+        account = None
+        if self.party:
+            with Transaction().set_context(
+                    date=self.accounting_date or self.invoice_date):
+                if self.type == 'out':
+                    account = self.party.account_receivable_used
+                elif self.type == 'in':
+                    account = self.party.account_payable_used
+        return account.id if account else None
+
     @fields.depends('type')
     def on_change_type(self):
         Journal = Pool().get('account.journal')
@@ -461,36 +426,16 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         table, _ = tables[None]
         return [Coalesce(table.accounting_date, table.invoice_date)]
 
-    @fields.depends('party', 'type', methods=['_update_account'])
+    @fields.depends('party', 'type')
     def on_change_party(self):
         self.invoice_address = None
         if self.party:
             self.invoice_address = self.party.address_get(type='invoice')
             self.party_tax_identifier = self.party.tax_identifier
             if self.type == 'out':
-                self.account = self.party.account_receivable_used
                 self.payment_term = self.party.customer_payment_term
             elif self.type == 'in':
-                self.account = self.party.account_payable_used
                 self.payment_term = self.party.supplier_payment_term
-        self._update_account()
-
-    @fields.depends(methods=['_update_account'])
-    def on_change_accounting_date(self):
-        self._update_account()
-
-    @fields.depends(methods=['_update_account'])
-    def on_change_invoice_date(self):
-        self._update_account()
-
-    @fields.depends('account', 'accounting_date', 'invoice_date')
-    def _update_account(self):
-        "Update account to current account"
-        if self.account:
-            account = self.account.current(
-                date=self.accounting_date or self.invoice_date)
-            if account != self.account:
-                self.account = account
 
     @fields.depends('currency')
     def on_change_with_currency_digits(self, name=None):
@@ -769,7 +714,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
                         invoice.company.currency, amount, invoice.currency)
             if invoice.type == 'in' and amount_currency:
                 amount_currency *= -1
-            res[invoice.id] = amount_currency
+            res[invoice.id] = invoice.currency.round(amount_currency)
         return res
 
     @classmethod
@@ -790,7 +735,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         invoice_query = Rule.query_get('account.invoice')
         Operator = fields.SQL_OPERATORS[operator]
         # SQLite uses float for sum
-        if value is not None and backend.name == 'sqlite':
+        if backend.name == 'sqlite':
             value = float(value)
 
         union = (line.join(invoice, condition=(invoice.id == line.invoice)
@@ -826,7 +771,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         invoice_query = Rule.query_get('account.invoice')
         Operator = fields.SQL_OPERATORS[operator]
         # SQLite uses float for sum
-        if value is not None and backend.name == 'sqlite':
+        if backend.name == 'sqlite':
             value = float(value)
 
         query = line.join(invoice,
@@ -855,7 +800,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         invoice_query = Rule.query_get('account.invoice')
         Operator = fields.SQL_OPERATORS[operator]
         # SQLite uses float for sum
-        if value is not None and backend.name == 'sqlite':
+        if backend.name == 'sqlite':
             value = float(value)
 
         query = tax.select(tax.invoice,
@@ -969,6 +914,9 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         line.description = self.description
         return line
 
+    def get_payment_term_computation_date(self):
+        return self.payment_term_date or self.invoice_date
+
     def get_move(self):
         '''
         Compute account move for the invoice and return the created move
@@ -993,7 +941,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
 
         total = sum(l.debit - l.credit for l in move_lines)
         if self.payment_term:
-            payment_date = self.payment_term_date or self.invoice_date
+            payment_date = self.get_payment_term_computation_date()
             term_lines = self.payment_term.compute(
                 total, self.company.currency, payment_date)
         else:
@@ -1010,7 +958,8 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             move_lines.append(line)
             if self.type == 'out' and date < today:
                 past_payment_term_dates.append(date)
-        if any(past_payment_term_dates):
+        # JCA : We never want this warning to be triggered
+        if False:
             lang = Lang.get()
             warning_key = 'invoice_payment_term_%d' % self.id
             if Warning.check(warning_key):
@@ -1179,15 +1128,14 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
 
     @classmethod
     def search_rec_name(cls, name, clause):
-        _, operator, value = clause
-        if operator.startswith('!') or operator.startswith('not '):
+        if clause[1].startswith('!') or clause[1].startswith('not '):
             bool_op = 'AND'
         else:
             bool_op = 'OR'
         return [bool_op,
-            ('number', *clause[1:]),
-            ('reference', *clause[1:]),
-            ('party', *clause[1:]),
+            ('number',) + tuple(clause[1:]),
+            ('reference',) + tuple(clause[1:]),
+            ('party',) + tuple(clause[1:]),
             ]
 
     def get_origins(self, name):
@@ -1539,7 +1487,8 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             if invoice.reconciled:
                 reconciled.append(invoice)
         if reconciled:
-            cls.__queue__.process(reconciled)
+            # cls.__queue__.process(reconciled)
+            cls.process(reconciled)
 
     @classmethod
     @ModelView.button_action('account_invoice.wizard_pay')
@@ -1611,7 +1560,11 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             to_reconcile = []
             for line in invoice.move.lines + invoice.cancel_move.lines:
                 if line.account == invoice.account:
-                    to_reconcile.append(line)
+                    # JMO : handle case of zero lines
+                    # on cancel move
+                    zero_reconciled = not line.amount and line.reconciliation
+                    if not zero_reconciled:
+                        to_reconcile.append(line)
             Line.reconcile(to_reconcile)
 
         cls._clean_payments(invoices)
@@ -2167,19 +2120,19 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
         if type_ == 'in':
             with Transaction().set_context(date=date):
                 self.account = self.product.account_expense_used
-            taxes = set()
+            taxes = []
             pattern = self._get_tax_rule_pattern()
             for tax in self.product.supplier_taxes_used:
                 if party and party.supplier_tax_rule:
                     tax_ids = party.supplier_tax_rule.apply(tax, pattern)
                     if tax_ids:
-                        taxes.update(tax_ids)
+                        taxes.extend(tax_ids)
                     continue
-                taxes.add(tax.id)
+                taxes.append(tax)
             if party and party.supplier_tax_rule:
                 tax_ids = party.supplier_tax_rule.apply(None, pattern)
                 if tax_ids:
-                    taxes.update(tax_ids)
+                    taxes.extend(tax_ids)
             self.taxes = taxes
 
             if self.company and self.company.purchase_taxes_expense:
@@ -2190,19 +2143,19 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
         else:
             with Transaction().set_context(date=date):
                 self.account = self.product.account_revenue_used
-            taxes = set()
+            taxes = []
             pattern = self._get_tax_rule_pattern()
             for tax in self.product.customer_taxes_used:
                 if party and party.customer_tax_rule:
                     tax_ids = party.customer_tax_rule.apply(tax, pattern)
                     if tax_ids:
-                        taxes.update(tax_ids)
+                        taxes.extend(tax_ids)
                     continue
-                taxes.add(tax.id)
+                taxes.append(tax.id)
             if party and party.customer_tax_rule:
                 tax_ids = party.customer_tax_rule.apply(None, pattern)
                 if tax_ids:
-                    taxes.update(tax_ids)
+                    taxes.extend(tax_ids)
             self.taxes = taxes
 
         category = self.product.default_uom.category
@@ -2222,7 +2175,7 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
     def on_change_account(self):
         if self.product:
             return
-        taxes = set()
+        taxes = []
         party = None
         if self.invoice and self.invoice.party:
             party = self.invoice.party
@@ -2247,13 +2200,13 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
                 if tax_rule:
                     tax_ids = tax_rule.apply(tax, pattern)
                     if tax_ids:
-                        taxes.update(tax_ids)
+                        taxes.extend(tax_ids)
                     continue
-                taxes.add(tax.id)
+                taxes.append(tax)
             if tax_rule:
                 tax_ids = tax_rule.apply(None, pattern)
                 if tax_ids:
-                    taxes.update(tax_ids)
+                    taxes.extend(tax_ids)
         self.taxes = taxes
 
     @classmethod
@@ -2287,15 +2240,10 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
 
     @classmethod
     def search_rec_name(cls, name, clause):
-        _, operator, value = clause
-        if operator.startswith('!') or operator.startswith('not '):
-            bool_op = 'AND'
-        else:
-            bool_op = 'OR'
-        return [bool_op,
-            ('invoice.rec_name', *clause[1:]),
-            ('product.rec_name', *clause[1:]),
-            ('account.rec_name', *clause[1:]),
+        return ['OR',
+            ('invoice.rec_name',) + tuple(clause[1:]),
+            ('product.rec_name',) + tuple(clause[1:]),
+            ('account.rec_name',) + tuple(clause[1:]),
             ]
 
     @classmethod
