@@ -302,9 +302,8 @@ class Period(Workflow, ModelSQL, ModelView):
         database = transaction.database
         connection = transaction.connection
 
-        # Lock period and move to be sure no new record will be created
+        # Lock period to be sure no new period will be created in between.
         database.lock(connection, JournalPeriod._table)
-        database.lock(connection, Move._table)
 
         unposted_moves = Move.search([
                 ('period', 'in', [p.id for p in periods]),

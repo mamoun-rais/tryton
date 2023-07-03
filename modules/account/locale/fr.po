@@ -70,6 +70,10 @@ msgctxt "field:account.account,left:"
 msgid "Left"
 msgstr "Gauche"
 
+msgctxt "field:account.account,line_count:"
+msgid "Line Count"
+msgstr "Nombre de lignes"
+
 msgctxt "field:account.account,name:"
 msgid "Name"
 msgstr "Nom"
@@ -166,6 +170,10 @@ msgctxt "field:account.account.deferral,fiscalyear:"
 msgid "Fiscal Year"
 msgstr "Année fiscale"
 
+msgctxt "field:account.account.deferral,line_count:"
+msgid "Line Count"
+msgstr "Nombre de lignes"
+
 msgctxt "field:account.account.deferral,second_currency:"
 msgid "Second Currency"
 msgstr "Devise secondaire"
@@ -221,6 +229,10 @@ msgstr "Type en débit"
 msgctxt "field:account.account.party,end_date:"
 msgid "End Date"
 msgstr "Date de fin"
+
+msgctxt "field:account.account.party,line_count:"
+msgid "Line Count"
+msgstr "Nombre de lignes"
 
 msgctxt "field:account.account.party,name:"
 msgid "Name"
@@ -765,6 +777,10 @@ msgctxt "field:account.general_ledger.account,general_ledger_balance:"
 msgid "General Ledger Balance"
 msgstr "Balance du grand livre"
 
+msgctxt "field:account.general_ledger.account,line_count:"
+msgid "Line Count"
+msgstr "Nombre de lignes"
+
 msgctxt "field:account.general_ledger.account,lines:"
 msgid "Lines"
 msgstr "Lignes"
@@ -864,6 +880,10 @@ msgstr "Date de fin"
 msgctxt "field:account.general_ledger.account.party,end_debit:"
 msgid "End Debit"
 msgstr "Débit final"
+
+msgctxt "field:account.general_ledger.account.party,line_count:"
+msgid "Line Count"
+msgstr "Nombre de lignes"
 
 msgctxt "field:account.general_ledger.account.party,party:"
 msgid "Party"
@@ -2531,6 +2551,34 @@ msgstr "Journal - période"
 msgctxt "model:account.journal.sequence,name:"
 msgid "Journal Sequence"
 msgstr "Séquence de journal"
+
+msgctxt "model:account.journal.type,name:"
+msgid "Journal Type"
+msgstr "Type de journal"
+
+msgctxt "model:account.journal.type,name:journal_type_cash"
+msgid "Cash"
+msgstr "Espèces"
+
+msgctxt "model:account.journal.type,name:journal_type_expense"
+msgid "Expense"
+msgstr "Charge"
+
+msgctxt "model:account.journal.type,name:journal_type_general"
+msgid "General"
+msgstr "Général"
+
+msgctxt "model:account.journal.type,name:journal_type_revenue"
+msgid "Revenue"
+msgstr "Produit"
+
+msgctxt "model:account.journal.type,name:journal_type_situation"
+msgid "Situation"
+msgstr "Situation"
+
+msgctxt "model:account.journal.type,name:journal_type_write_off"
+msgid "Write-Off"
+msgstr "Pertes et profits"
 
 msgctxt "model:account.move,name:"
 msgid "Account Move"

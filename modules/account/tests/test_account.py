@@ -206,17 +206,6 @@ class AccountTestCase(
             update_chart.transition_update()
 
     @with_transaction()
-    def test_account_chart_many_companies(self):
-        "Test creation of chart of accounts for many companies"
-        company1 = create_company()
-        with set_company(company1):
-            create_chart(company1, tax=True)
-
-        company2 = create_company()
-        with set_company(company2):
-            create_chart(company2, tax=True)
-
-    @with_transaction()
     def test_fiscalyear(self):
         'Test fiscalyear'
         pool = Pool()
@@ -1091,6 +1080,74 @@ class AccountTestCase(
         self.assertEqual(tax['amount'], Decimal('20.02'))
 
     @with_transaction()
+    def test_taxable_mixin_tax_residual_rounding(self):
+        "Test TaxableMixin with rounding with residual amount"
+        pool = Pool()
+        Account = pool.get('account.account')
+        Tax = pool.get('account.tax')
+        Configuration = pool.get('account.configuration')
+        currency = create_currency('cur')
+
+        company = create_company()
+        with set_company(company):
+            create_chart(company)
+
+            tax_account, = Account.search([
+                    ('name', '=', 'Main Tax'),
+                    ])
+
+            tax1 = Tax()
+            tax1.name = tax1.description = "Tax 1"
+            tax1.type = 'percentage'
+            tax1.rate = Decimal('.1')
+            tax1.invoice_account = tax_account
+            tax1.credit_note_account = tax_account
+            tax1.save()
+            tax2 = Tax()
+            tax2.name = tax2.description = "Tax 2"
+            tax2.type = 'percentage'
+            tax2.rate = Decimal('.1')
+            tax2.invoice_account = tax_account
+            tax2.credit_note_account = tax_account
+            tax2.save()
+
+            config = Configuration(1)
+            config.tax_rounding = 'line'
+            config.save()
+
+            taxable = self.Taxable(
+                currency=currency,
+                taxable_lines=[
+                    ([tax1, tax2], Decimal('1.0417'), 1, None),
+                    ])
+
+            taxes = taxable._get_taxes()
+
+            taxline_1, taxline_2 = taxes
+            self.assertEqual(taxline_1['base'], Decimal('1.04'))
+            self.assertEqual(taxline_1['amount'], Decimal('.11'))
+            self.assertEqual(taxline_2['base'], Decimal('1.04'))
+            self.assertEqual(taxline_2['amount'], Decimal('.10'))
+
+            # -2.95 is the unit price of -3.54 with 20% tax included
+            taxable = self.Taxable(
+                currency=currency,
+                taxable_lines=[
+                    ([tax1], Decimal('30.00'), 1, None),
+                    ([tax1, tax2], Decimal('-2.95'), 1, None),
+                    ])
+
+            taxes = taxable._get_taxes()
+
+            taxline_1, taxline_2, taxline_3 = taxes
+            self.assertEqual(taxline_1['base'], Decimal('30.00'))
+            self.assertEqual(taxline_1['amount'], Decimal('3.00'))
+            self.assertEqual(taxline_2['base'], Decimal('-2.95'))
+            self.assertEqual(taxline_2['amount'], Decimal('-0.29'))
+            self.assertEqual(taxline_3['base'], Decimal('-2.95'))
+            self.assertEqual(taxline_3['amount'], Decimal('-0.30'))
+
+    @with_transaction()
     def test_tax_compute_with_children_update_unit_price(self):
         "Test tax compute with children taxes modifying unit_price"
         pool = Pool()
@@ -1414,11 +1471,6 @@ class AccountTestCase(
                 self.assertEqual(type_.name, type_.template.name)
                 self.assertEqual(
                     type_.statement, type_.template.statement)
-                if type_.template.parent:
-                    self.assertEqual(
-                        type_.parent.name, type_.template.parent.name)
-                else:
-                    self.assertEqual(type_.parent, None)
 
             for account in Account.search([]):
                 self.assertEqual(account.name, account.template.name)
@@ -1436,11 +1488,6 @@ class AccountTestCase(
                 self.assertEqual(
                     set(t.template for t in account.taxes),
                     set(t for t in account.template.taxes))
-                if account.template.parent:
-                    self.assertEqual(
-                        account.parent.name, account.template.parent.name)
-                else:
-                    self.assertEqual(account.parent, None)
 
             for tax_code in TaxCode.search([]):
                 self.assertEqual(tax_code.name, tax_code.template.name)
@@ -1491,11 +1538,6 @@ class AccountTestCase(
             new_type.parent = root_type
             new_type.statement = 'balance'
             new_type.save()
-            updated_tax_type, = TypeTemplate.search([
-                    ('name', '=', "Tax"),
-                    ])
-            updated_tax_type.parent = updated_tax_type.parent.parent
-            updated_tax_type.save()
             new_account = AccountTemplate()
             new_account.name = 'New Account'
             new_account.parent = chart
@@ -1509,7 +1551,6 @@ class AccountTestCase(
                     'account', 'account_template_revenue_en'))
             updated_account.code = 'REV'
             updated_account.name = 'Updated Account'
-            updated_account.parent = new_account
             updated_account.reconcile = True
             updated_account.end_date = datetime.date.today()
             updated_account.taxes = [updated_tax]
@@ -1558,7 +1599,6 @@ class AccountTestCase(
         AccountTemplate = pool.get('account.account.template')
         TaxTemplate = pool.get('account.tax.template')
         TaxCodeTemplate = pool.get('account.tax.code.template')
-        TaxCodeTemplateLine = pool.get('account.tax.code.line.template')
         UpdateChart = pool.get('account.update_chart', type='wizard')
         Type = pool.get('account.account.type')
         Account = pool.get('account.account')
@@ -1617,7 +1657,7 @@ class AccountTestCase(
             tax_code.template_override = True
             tax_code.save()
 
-            template_tax_code_line, = TaxCodeTemplateLine.search([], limit=1)
+            template_tax_code_line, = TaxCodeLine.search([], limit=1)
             tax_code_line, = TaxCodeLine.search(
                 [('template', '=', template_tax_code_line.id)])
             tax_code_line.template_override = True

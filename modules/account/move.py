@@ -87,7 +87,6 @@ class Move(ModelSQL, ModelView):
     @classmethod
     def __setup__(cls):
         super(Move, cls).__setup__()
-        cls.create_date.select = True
         cls._check_modify_exclude = ['lines']
         cls._order.insert(0, ('date', 'DESC'))
         cls._order.insert(1, ('number', 'DESC'))
@@ -128,6 +127,9 @@ class Move(ModelSQL, ModelView):
 
         table = cls.__table_handler__(module_name)
         table.index_action(['journal', 'period'], 'add')
+
+        # Add index on create_date
+        table.index_action('create_date', action='add')
 
     @classmethod
     def order_post_number(cls, tables):
@@ -268,24 +270,16 @@ class Move(ModelSQL, ModelView):
     def create(cls, vlist):
         pool = Pool()
         Journal = pool.get('account.journal')
-        context = Transaction().context
 
-        journals = {}
-        default_company = cls.default_company()
         vlist = [x.copy() for x in vlist]
         for vals in vlist:
             if not vals.get('number'):
-                journal_id = vals.get('journal', context.get('journal'))
-                company_id = vals.get('company', default_company)
+                journal_id = (vals.get('journal')
+                        or Transaction().context.get('journal'))
                 if journal_id:
-                    if journal_id not in journals:
-                        journal = journals[journal_id] = Journal(journal_id)
-                    else:
-                        journal = journals[journal_id]
-                    sequence = journal.get_multivalue(
-                        'sequence', company=company_id)
-                    if sequence:
-                        vals['number'] = sequence.get()
+                    journal = Journal(journal_id)
+                    if journal.sequence:
+                        vals['number'] = journal.sequence.get()
 
         moves = super(Move, cls).create(vlist)
         cls.validate_move(moves)
@@ -431,6 +425,7 @@ class Move(ModelSQL, ModelView):
                 raise PostError(
                     gettext('account.msg_post_unbalanced_move',
                         move=move.rec_name))
+        reconciliations = []
         for move in moves:
             move.state = 'posted'
             if not move.post_number:
@@ -441,11 +436,14 @@ class Move(ModelSQL, ModelView):
                 return l.party, l.account
             to_reconcile = [l for l in move.lines
                 if ((l.debit == l.credit == Decimal('0'))
-                    and l.account.reconcile)]
+                    and l.account.reconcile
+                    and not l.reconciliation)]
             to_reconcile = sorted(to_reconcile, key=keyfunc)
-            for _, zero_lines in groupby(to_reconcile, keyfunc):
-                Line.reconcile(list(zero_lines))
+            reconciliations += [
+                list(x) for _, x in groupby(to_reconcile, keyfunc)]
         cls.save(moves)
+        if reconciliations:
+            Line.reconcile(*reconciliations)
 
 
 class Reconciliation(ModelSQL, ModelView):
@@ -1030,6 +1028,12 @@ class Line(ModelSQL, ModelView):
         return [('account.rec_name',) + tuple(clause[1:])]
 
     @classmethod
+    def get_query_get_where_clause(cls, table, where):
+        # RSE add hook to override where clause #9462
+        # overriden in account_per_product module
+        return where
+
+    @classmethod
     def query_get(cls, table):
         '''
         Return SQL clause and fiscal years for account move line
@@ -1064,9 +1068,7 @@ class Line(ModelSQL, ModelView):
                     ('start_date', '<=', date),
                     ('end_date', '>=', date),
                     ('company', '=', company),
-                    ],
-                order=[('start_date', 'DESC')],
-                limit=1)
+                    ], limit=1)
             if fiscalyears:
                 fiscalyear_id = fiscalyears[0].id
             else:
@@ -1093,6 +1095,7 @@ class Line(ModelSQL, ModelView):
                     ])
             fiscalyear_ids = list(map(int, fiscalyears))
 
+        where = cls.get_query_get_where_clause(table, where)
         # Use LEFT JOIN to allow database optimization
         # if no joined table is used in the where clause.
         return (table.move.in_(move
@@ -1131,10 +1134,6 @@ class Line(ModelSQL, ModelView):
         and if there is no journal - period, create it
         '''
         JournalPeriod = Pool().get('account.journal.period')
-        transaction = Transaction()
-        database = transaction.database
-        connection = transaction.connection
-
         journal_periods = JournalPeriod.search([
                 ('journal', '=', journal.id),
                 ('period', '=', period.id),
@@ -1146,7 +1145,6 @@ class Line(ModelSQL, ModelView):
                     gettext('account.msg_modify_line_closed_journal_period',
                         journal_period=journal_period.rec_name))
         else:
-            database.lock(connection, JournalPeriod._table)
             JournalPeriod.create([{
                         'journal': journal.id,
                         'period': period.id,
@@ -1217,34 +1215,25 @@ class Line(ModelSQL, ModelView):
     def create(cls, vlist):
         pool = Pool()
         Move = pool.get('account.move')
-
-        def move_fields():
-            for fname, field in cls._fields.items():
-                if (isinstance(field, fields.Function)
-                        and field.setter == 'set_move_field'):
-                    if fname.startswith('move_'):
-                        fname = fname[5:]
-                    yield fname
-
-        moves = {}
-        context = Transaction().context
+        move = None
         vlist = [x.copy() for x in vlist]
         for vals in vlist:
             if not vals.get('move'):
-                move_values = {}
-                for fname in move_fields():
-                    move_values[fname] = vals.get(fname) or context.get(fname)
-                key = tuple(sorted(move_values.items()))
-                move = moves.get(key)
                 if move is None:
-                    move = Move(**move_values)
+                    journal_id = (vals.get('journal')
+                            or Transaction().context.get('journal'))
+                    move = Move()
+                    move.period = vals.get('period',
+                        Transaction().context.get('period'))
+                    if move.period:
+                        move.company = move.period.company
+                    move.journal = journal_id
+                    move.date = vals.get('date')
                     move.save()
-                    moves[key] = move
                 vals['move'] = move.id
             else:
-                # prevent default value for field with set_move_field
-                for fname in move_fields():
-                    vals.setdefault(fname, None)
+                # prevent computation of default date
+                vals.setdefault('date', None)
         lines = super(Line, cls).create(vlist)
         period_and_journals = set((line.period, line.journal)
             for line in lines)
@@ -1522,28 +1511,17 @@ class OpenAccount(Wizard):
     open_ = StateAction('account.act_move_line_form')
 
     def do_open_(self, action):
-        pool = Pool()
-        FiscalYear = pool.get('account.fiscalyear')
-        context = Transaction().context
+        FiscalYear = Pool().get('account.fiscalyear')
 
-        company_id = self.record.company.id if self.record else -1
-        date = context.get('date')
-        fiscalyear = context.get('fiscalyear')
-        if date:
-            fiscalyears = FiscalYear.search([
-                    ('start_date', '<=', date),
-                    ('end_date', '>=', date),
-                    ('company', '=', company_id),
-                    ],
-                order=[('start_date', 'DESC')],
-                limit=1)
-        elif fiscalyear:
-            fiscalyears = [FiscalYear(fiscalyear)]
-        else:
+        if not Transaction().context.get('fiscalyear'):
             fiscalyears = FiscalYear.search([
                     ('state', '=', 'open'),
-                    ('company', '=', company_id),
+                    ('company', '=',
+                        self.record.company.id if self.record else None),
                     ])
+        else:
+            fiscalyears = [FiscalYear(Transaction().context['fiscalyear'])]
+
         periods = [p for f in fiscalyears for p in f.periods]
 
         action['pyson_domain'] = [
@@ -1743,39 +1721,38 @@ class Reconcile(Wizard):
                 having=having))
         return [p for p, in cursor]
 
+    def _next_account(self):
+        accounts = list(self.show.accounts)
+        if not accounts:
+            return
+        account = accounts.pop()
+        self.show.account = account
+        self.show.parties = self.get_parties(account)
+        self.show.accounts = accounts
+        return account
+
+    def _next_party(self):
+        parties = list(self.show.parties)
+        if not parties:
+            return
+        party = parties.pop()
+        self.show.party = party
+        self.show.parties = parties
+        return party
+
+
     def transition_next_(self):
+        if getattr(self.show, 'accounts', None) is None:
+            self.show.accounts = self.get_accounts()
+            if not self._next_account():
+                return 'end'
+        if getattr(self.show, 'parties', None) is None:
+            self.show.parties = self.get_parties(self.show.account)
 
-        def next_account():
-            accounts = list(self.show.accounts)
-            if not accounts:
-                return
-            account = accounts.pop()
-            self.show.account = account
-            self.show.parties = self.get_parties(account)
-            self.show.accounts = accounts
-            return account
-
-        def next_party():
-            parties = list(self.show.parties)
-            if not parties:
-                return
-            party = parties.pop()
-            self.show.party = party
-            self.show.parties = parties
-            return party,
-
-        with Transaction().set_context(_check_access=True):
-            if getattr(self.show, 'accounts', None) is None:
-                self.show.accounts = self.get_accounts()
-                if not next_account():
-                    return 'end'
-            if getattr(self.show, 'parties', None) is None:
-                self.show.parties = self.get_parties(self.show.account)
-
-            while not next_party():
-                if not next_account():
-                    return 'end'
-            return 'show'
+        while not self._next_party():
+            if not self._next_account():
+                return 'end'
+        return 'show'
 
     def default_show(self, fields):
         pool = Pool()
