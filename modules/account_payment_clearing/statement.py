@@ -19,28 +19,28 @@ class Statement(metaclass=PoolMeta):
 
         moves = super(Statement, cls).create_move(statements)
 
-        to_success = set()
-        to_fail = set()
+        to_success = []
+        to_fail = []
         for move, statement, lines in moves:
             for line in lines:
                 if line.payment:
-                    payments = {line.payment}
+                    payments = [line.payment]
                     kind = line.payment.kind
                 elif line.payment_group:
-                    payments = set(line.payment_group.payments)
+                    payments = line.payment_group.payments
                     kind = line.payment_group.kind
                 else:
                     continue
                 if (kind == 'receivable') == (line.amount >= 0):
-                    to_success.update(payments)
+                    to_success.extend(payments)
                 else:
-                    to_fail.update(payments)
+                    to_fail.extend(payments)
         # The failing should be done last because success is usually not a
         # definitive state
         if to_success:
-            Payment.succeed(Payment.browse(to_success))
+            Payment.succeed(to_success)
         if to_fail:
-            Payment.fail(Payment.browse(to_fail))
+            Payment.fail(to_fail)
 
         for move, statement, lines in moves:
             assert len({l.payment for l in lines}) == 1
@@ -59,9 +59,7 @@ class Statement(metaclass=PoolMeta):
 
     def _group_key(self, line):
         key = super(Statement, self)._group_key(line)
-        if hasattr(line, 'payment'):
-            key += (('payment', line.payment),)
-        return key
+        return key + (('payment', line.payment),)
 
 
 class StatementLine(metaclass=PoolMeta):
