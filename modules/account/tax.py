@@ -896,7 +896,13 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
                     if tax.update_unit_price:
                         unit_price_variation += value['amount']
                 if len(tax.childs):
-                    res.extend(cls._unit_compute(tax.childs, price_unit, date))
+                    # change to handle update_unit_price with child tax
+                    # see tryton issues 7862
+                    child_tax = cls._unit_compute(tax.childs, price_unit, date)
+                    if tax.update_unit_price:
+                        for cur_tax in child_tax:
+                            unit_price_variation += cur_tax['amount']
+                    res.extend(child_tax)
             price_unit += unit_price_variation
         return res
 
@@ -909,10 +915,9 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
             if not (start_date <= date <= end_date):
                 continue
 
-            if tax.type == 'percentage':
-                rate += tax.rate
-            elif tax.type == 'fixed':
-                amount += tax.amount
+            tax_rate, tax_amount = tax._reverse_rate_amount_from_type()
+            rate += tax_rate
+            amount += tax_amount
 
             if tax.childs:
                 child_rate, child_amount = cls._reverse_rate_amount(
@@ -920,6 +925,14 @@ class Tax(sequence_ordered(), ModelSQL, ModelView, DeactivableMixin):
                 rate += child_rate
                 amount += child_amount
         return rate, amount
+
+    def _reverse_rate_amount_from_type(self):
+        # Use another method to allow override for custom tax types
+        if self.type == 'percentage':
+            return self.rate, 0
+        elif self.type == 'fixed':
+            return 0, self.amount
+        return 0, 0
 
     @classmethod
     def _reverse_unit_compute(cls, price_unit, taxes, date):
@@ -1046,7 +1059,9 @@ class _TaxKey(dict):
         self.update(kwargs)
 
     def _key(self):
-        return (self['account'], self['tax'])
+        # JMO : backport https://bugs.tryton.org/issue8759
+        # to be able to fix https://support.coopengo.com/issues/11322
+        return (self['account'], self['tax'], self['base'] >= 0)
 
     def __eq__(self, other):
         if isinstance(other, _TaxKey):
@@ -1204,7 +1219,7 @@ class TaxLine(ModelSQL, ModelView):
                         & (table.code.in_(
                                 [invoice_base_code, credit_note_base_code]))))
 
-    @fields.depends('move_line', '_parent_move_line.currency_digits')
+    @fields.depends('move_line')
     def on_change_with_currency_digits(self, name=None):
         if self.move_line:
             return self.move_line.currency_digits
@@ -1736,7 +1751,6 @@ class TestTaxView(ModelView, TaxableMixin):
         result = []
         if all([self.tax_date, self.unit_price, self.quantity, self.currency]):
             for taxline in self._get_taxes():
-                del taxline['manual']
                 result.append(Result(**taxline))
         self.result = result
         return self._changed_values.get('result', [])

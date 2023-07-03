@@ -934,6 +934,12 @@ class Line(ModelSQL, ModelView):
         return [('account.rec_name',) + tuple(clause[1:])]
 
     @classmethod
+    def get_query_get_where_clause(cls, table, where):
+        # RSE add hook to override where clause #9462
+        # overriden in account_per_product module
+        return where
+
+    @classmethod
     def query_get(cls, table):
         '''
         Return SQL clause and fiscal years for account move line
@@ -992,9 +998,11 @@ class Line(ModelSQL, ModelView):
                     ])
             fiscalyear_ids = list(map(int, fiscalyears))
 
+        where = cls.get_query_get_where_clause(table, where)
         # Use LEFT JOIN to allow database optimization
         # if no joined table is used in the where clause.
-        return (table.move.in_(move
+        return ((table.state != 'draft')
+            & table.move.in_(move
                 .join(period, 'LEFT', condition=move.period == period.id)
                 .join(fiscalyear, 'LEFT',
                     condition=period.fiscalyear == fiscalyear.id)
@@ -1038,7 +1046,7 @@ class Line(ModelSQL, ModelView):
             journal_period, = journal_periods
             if journal_period.state == 'close':
                 raise AccessError(
-                    gettext('account.msg_modify_line_closed_journal_period',
+                    gettext('account.msg_modify_line_closed_period',
                         journal_period=journal_period.rec_name))
         else:
             JournalPeriod.create([{
@@ -1147,7 +1155,6 @@ class Line(ModelSQL, ModelView):
             default = default.copy()
         default.setdefault('move', None)
         default.setdefault('reconciliation', None)
-        default.setdefault('reconciliations_delegated', [])
         return super(Line, cls).copy(lines, default=default)
 
     @classmethod
@@ -1607,36 +1614,37 @@ class Reconcile(Wizard):
                     )))
         return [p for p, in cursor.fetchall()]
 
+    def _next_account(self):
+        accounts = list(self.show.accounts)
+        if not accounts:
+            return
+        account = accounts.pop()
+        self.show.account = account
+        self.show.parties = self.get_parties(account)
+        self.show.accounts = accounts
+        return account
+
+    def _next_party(self):
+        parties = list(self.show.parties)
+        if not parties:
+            return
+        party = parties.pop()
+        self.show.party = party
+        self.show.parties = parties
+        return party
+
+
     def transition_next_(self):
-
-        def next_account():
-            accounts = list(self.show.accounts)
-            if not accounts:
-                return
-            account = accounts.pop()
-            self.show.account = account
-            self.show.parties = self.get_parties(account)
-            self.show.accounts = accounts
-            return account
-
-        def next_party():
-            parties = list(self.show.parties)
-            if not parties:
-                return
-            party = parties.pop()
-            self.show.party = party
-            self.show.parties = parties
-            return party
 
         if getattr(self.show, 'accounts', None) is None:
             self.show.accounts = self.get_accounts()
-            if not next_account():
+            if not self._next_account():
                 return 'end'
         if getattr(self.show, 'parties', None) is None:
             self.show.parties = self.get_parties(self.show.account)
 
-        while not next_party():
-            if not next_account():
+        while not self._next_party():
+            if not self._next_account():
                 return 'end'
         return 'show'
 
@@ -1832,9 +1840,8 @@ class GroupLines(Wizard):
             if line.account.reconcile:
                 to_reconcile[line.account].append(line)
 
-        if balance_line:
-            balance_line.move = move
-            balance_line.save()
+        balance_line.move = move
+        balance_line.save()
 
         for lines in to_reconcile.values():
             Line.reconcile(lines, delegate_to=balance_line)
@@ -1908,16 +1915,16 @@ class GroupLines(Wizard):
 
         counterpart_lines = []
         for line in lines:
-            if maturity_dates[line.account] and line.maturity_date:
+            if maturity_dates[line.account]:
                 maturity_dates[line.account] = min(
                     maturity_dates[line.account], line.maturity_date)
-            elif line.maturity_date:
+            else:
                 maturity_dates[line.account] = line.maturity_date
-            cline = self._counterpart_line(line)
-            accounts[cline.account] += cline.debit - cline.credit
-            if cline.amount_second_currency:
-                amount_second_currency += cline.amount_second_currency
-            counterpart_lines.append(cline)
+            line = self._counterpart_line(line)
+            accounts[line.account] += line.debit - line.credit
+            if line.amount_second_currency:
+                amount_second_currency += line.amount_second_currency
+            counterpart_lines.append(line)
         move.lines = counterpart_lines
 
         balance_line = None
@@ -1947,7 +1954,7 @@ class GroupLines(Wizard):
                 balance_line.second_currency = grouping['second_currency']
                 balance_line.amount_second_currency = (
                     -amount_second_currency)
-            balance_line.maturity_date = maturity_dates[balance_line.account]
+        balance_line.maturity_date = maturity_dates[balance_line.account]
         return move, balance_line
 
     def _counterpart_line(self, line):

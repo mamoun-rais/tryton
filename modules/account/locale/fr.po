@@ -3334,6 +3334,34 @@ msgctxt "model:account.journal.sequence,name:"
 msgid "Journal Sequence"
 msgstr "Séquence de journal"
 
+msgctxt "model:account.journal.type,name:"
+msgid "Journal Type"
+msgstr "Type de journal"
+
+msgctxt "model:account.journal.type,name:journal_type_cash"
+msgid "Cash"
+msgstr "Espèces"
+
+msgctxt "model:account.journal.type,name:journal_type_expense"
+msgid "Expense"
+msgstr "Charge"
+
+msgctxt "model:account.journal.type,name:journal_type_general"
+msgid "General"
+msgstr "Général"
+
+msgctxt "model:account.journal.type,name:journal_type_revenue"
+msgid "Revenue"
+msgstr "Produit"
+
+msgctxt "model:account.journal.type,name:journal_type_situation"
+msgid "Situation"
+msgstr "Situation"
+
+msgctxt "model:account.journal.type,name:journal_type_write_off"
+msgid "Write-Off"
+msgstr "Pertes et profits"
+
 msgctxt "model:account.move,name:"
 msgid "Account Move"
 msgstr "Mouvement comptable"
