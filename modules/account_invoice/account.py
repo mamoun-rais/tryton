@@ -186,6 +186,12 @@ class Move(metaclass=PoolMeta):
     def _get_origin(cls):
         return super(Move, cls)._get_origin() + ['account.invoice']
 
+    @classmethod
+    def copy(cls, moves, default=None):
+        default = {} if default is None else default.copy()
+        default.setdefault('lines.invoice_payments', lambda data: None)
+        return super().copy(moves, default)
+
 
 class MoveLine(metaclass=PoolMeta):
     __name__ = 'account.move.line'
@@ -213,7 +219,8 @@ class MoveLine(metaclass=PoolMeta):
     @classmethod
     def __setup__(cls):
         super(MoveLine, cls).__setup__()
-        cls._check_modify_exclude.add('invoice_payment')
+        cls._check_modify_exclude.update(
+            {'invoice_payment', 'invoice_payments'})
 
     @classmethod
     def _get_origin(cls):

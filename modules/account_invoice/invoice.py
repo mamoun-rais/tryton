@@ -489,7 +489,7 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             if self.currency:
                 return self.currency.is_zero(amount)
             else:
-                return amount == Decimal('0.0')
+                return amount != Decimal('0.0')
 
         tax_keys = []
         taxes = list(self.taxes or [])
@@ -917,6 +917,9 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         line.description = self.description
         return line
 
+    def get_payment_term_computation_date(self):
+        return self.invoice_date
+
     def get_move(self):
         '''
         Compute account move for the invoice and return the created move
@@ -945,7 +948,8 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         term_lines = [(Date.today(), total)]
         if self.payment_term:
             term_lines = self.payment_term.compute(
-                total, self.company.currency, self.invoice_date)
+                total, self.company.currency,
+                self.get_payment_term_computation_date())
         remainder_total_currency = total_currency
         for date, amount in term_lines:
             line = self._get_move_line(date, amount)
@@ -1180,7 +1184,6 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         default.setdefault('move', None)
         default.setdefault('cancel_move', None)
         default.setdefault('invoice_report_cache', None)
-        default.setdefault('invoice_report_cache_id', None)
         default.setdefault('invoice_report_format', None)
         default.setdefault('payment_lines', None)
         default.setdefault('invoice_date', None)
@@ -1361,10 +1364,9 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
         '''
         credit = self.__class__(**values)
 
-        for field in [
-                'company', 'tax_identifier', 'party', 'party_tax_identifier',
-                'invoice_address', 'currency', 'journal', 'account',
-                'payment_term', 'description', 'comment', 'type']:
+        for field in ('company', 'party', 'invoice_address', 'currency',
+               'journal', 'account', 'payment_term', 'description',
+               'comment', 'type'):
             setattr(credit, field, getattr(self, field))
 
         credit.lines = [line._credit() for line in self.lines]
@@ -1521,7 +1523,11 @@ class Invoice(Workflow, ModelSQL, ModelView, TaxableMixin):
             to_reconcile = []
             for line in invoice.move.lines + invoice.cancel_move.lines:
                 if line.account == invoice.account:
-                    to_reconcile.append(line)
+                    # JMO : handle case of zero lines
+                    # on cancel move
+                    zero_reconciled = not line.amount and line.reconciliation
+                    if not zero_reconciled:
+                        to_reconcile.append(line)
             Line.reconcile(to_reconcile)
 
         cls._clean_payments(invoices)
@@ -2238,10 +2244,8 @@ class InvoiceLine(sequence_ordered(), ModelSQL, ModelView, TaxableMixin):
         else:
             line.quantity = self.quantity
 
-        for field in [
-                'sequence', 'type', 'invoice_type', 'party', 'currency',
-                'company', 'unit_price', 'description', 'unit', 'product',
-                'account']:
+        for field in ('sequence', 'type', 'invoice_type', 'unit_price',
+                'description', 'unit', 'product', 'account'):
             setattr(line, field, getattr(self, field))
         line.taxes = self.taxes
         return line
