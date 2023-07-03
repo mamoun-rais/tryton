@@ -40,6 +40,15 @@ class BankAccount(DeactivableMixin, ModelSQL, ModelView):
         required=True,
         help="Add the numbers which identify the bank account.")
 
+    @classmethod
+    def __setup__(cls):
+        # The bank field should be not required on bank account in order
+        # to be able to create and migrate bank accounts
+        # without having the bank information
+        # redime 19670
+        super(BankAccount, cls).__setup__()
+        cls.bank.required = False
+
     def get_rec_name(self, name):
         return self.numbers[0].number
 
