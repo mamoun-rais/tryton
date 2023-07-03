@@ -52,18 +52,6 @@ class EmailTemplate(metaclass=PoolMeta):
             'party.party', 'party.contact_mechanism']
 
     @classmethod
-    def _get_default_exclude(cls, record):
-        pool = Pool()
-        Party = pool.get('party.party')
-        ContactMechanism = pool.get('party.contact_mechanism')
-        exclude = super()._get_default_exclude(record)
-        if isinstance(record, Party):
-            exclude.append('contact_mechanisms')
-        if isinstance(record, ContactMechanism):
-            exclude.append('party')
-        return exclude
-
-    @classmethod
     def _get_address(cls, record):
         pool = Pool()
         Party = pool.get('party.party')
@@ -91,7 +79,7 @@ class EmailTemplate(metaclass=PoolMeta):
         if isinstance(record, Party):
             usage = Transaction().context.get('usage')
             contact = record.contact_mechanism_get('email', usage=usage)
-            if contact and contact.language:
+            if contact.language:
                 language = contact.language
             elif record.lang:
                 language = record.lang
