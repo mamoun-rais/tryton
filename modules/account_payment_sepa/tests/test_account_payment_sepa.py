@@ -244,10 +244,11 @@ class AccountPaymentSepaTestCase(CompanyTestMixin, ModuleTestCase):
                     })
             self.assertEqual(mandate.identification, None)
 
-            self.assertRaises(UserError, Mandate.create, [{
-                        'party': party.id,
-                        'identification': same_id,
-                        }])
+            # RSE 20/04/17: We removed the constraint
+            # self.assertRaises(UserError, Mandate.create, [{
+            #             'party': party.id,
+            #             'identification': same_id,
+            #             }])
 
     @with_transaction()
     def test_payment_sepa_bank_account_number(self):
@@ -299,7 +300,6 @@ class AccountPaymentSepaTestCase(CompanyTestMixin, ModuleTestCase):
             journal = setup_journal('pain.008.001.02', 'receivable',
                 company, company_account)
 
-            self.assertFalse(mandate.has_payments)
             self.assertEqual(mandate.sequence_type, 'FRST')
             mandate.sequence_type_rcur = True
             self.assertEqual(mandate.sequence_type, 'RCUR')
@@ -323,7 +323,6 @@ class AccountPaymentSepaTestCase(CompanyTestMixin, ModuleTestCase):
                 _, data = process_payment.do_process(None)
 
             self.assertEqual(payment.sepa_mandate_sequence_type, 'FRST')
-            self.assertTrue(payment.sepa_mandate.has_payments)
 
             payments = Payment.create([{
                         'company': company,

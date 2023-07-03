@@ -482,7 +482,7 @@ class Mandate(Workflow, ModelSQL, ModelView):
             ], 'State', readonly=True)
     payments = fields.One2Many('account.payment', 'sepa_mandate', 'Payments')
     has_payments = fields.Function(fields.Boolean('Has Payments'),
-        'get_has_payments')
+        'has_payments')
 
     @classmethod
     def __setup__(cls):
@@ -513,11 +513,16 @@ class Mandate(Workflow, ModelSQL, ModelView):
                     'depends': ['state'],
                     },
                 })
-        t = cls.__table__()
-        cls._sql_constraints = [
-            ('identification_unique', Unique(t, t.company, t.identification),
-                'account_payment_sepa.msg_mandate_unique_id'),
-            ]
+        # t = cls.__table__()
+        # JMO/RSE 2017_04_18 Following 4929e02594d
+        # We override in coog the possibility to keep the mandate
+        # for several bank account but we suffer from the register order
+        # if we try to delete the constraint from coog module
+        # t = cls.__table__()
+        # cls._sql_constraints = [
+        #     ('identification_unique', Unique(t, t.company, t.identification),
+        #         'account_payment_sepa.msg_mandate_unique_id'),
+        #     ]
 
     @classmethod
     def __register__(cls, module_name):
@@ -650,10 +655,10 @@ class Mandate(Workflow, ModelSQL, ModelView):
             return 'RCUR'
 
     @classmethod
-    def get_has_payments(cls, mandates, name):
+    def has_payments(cls, mandates, name):
         pool = Pool()
         Payment = pool.get('account.payment')
-        payment = Payment.__table__()
+        payment = Payment.__table__
         cursor = Transaction().connection.cursor()
 
         has_payments = dict.fromkeys([m.id for m in mandates], False)
@@ -664,7 +669,7 @@ class Mandate(Workflow, ModelSQL, ModelView):
                     group_by=payment.sepa_mandate))
             has_payments.update(cursor)
 
-        return has_payments
+        return {'has_payments': has_payments}
 
     @classmethod
     @ModelView.button

@@ -64,7 +64,8 @@ class Party(metaclass=PoolMeta):
             if identifier.type == name:
                 return identifier.sepa_identifier
         else:
-            type = dict(Identifier.get_types()).get(name, name)
+            selection = Identifier.fields_get(['type'])['type']['selection']
+            type = dict(selection).get(name, name)
             raise PartyIdentificationdError(
                 gettext('account_payment_sepa.msg_party_no_id',
                     party=self.rec_name,
@@ -107,3 +108,13 @@ class PartyIdentifier(metaclass=PoolMeta):
         elif self.type == 'es_nif':
             identifier['Id'] += self.sepa_es_suffix or '000'
         return identifier
+
+
+class Replace(metaclass=PoolMeta):
+    __name__ = 'party.replace'
+
+    @classmethod
+    def fields_to_replace(cls):
+        return super(Replace, cls).fields_to_replace() + [
+                ('account.payment.sepa.mandate', 'party'),
+                ]
