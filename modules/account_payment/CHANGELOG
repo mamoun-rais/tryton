@@ -1,8 +1,4 @@
-Version 6.0.3 - 2022-02-16
-* Bug fixes (see mercurial logs for details)
-
-Version 6.0.2 - 2022-02-01
-* Bug fixes (see mercurial logs for details)
+* Add amount_line_paid property on payments
 
 Version 6.0.1 - 2021-06-17
 * Bug fixes (see mercurial logs for details)

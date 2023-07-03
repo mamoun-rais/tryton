@@ -121,8 +121,7 @@ class MoveLine(metaclass=PoolMeta):
         second_amount = Abs(table.amount_second_currency) - payment_amount
         amount = Case((table.second_currency == Null, main_amount),
             else_=second_amount)
-        value = cls.payment_amount._field.sql_cast(
-            cls.payment_amount.sql_format(value))
+        value = cls.payment_amount.sql_format(value)
 
         query = (table
             .join(payment, type_='LEFT',
@@ -488,10 +487,9 @@ class Invoice(metaclass=PoolMeta):
                         continue
                     payment_amount = Decimal(0)
                     for payment in line.payments:
-                        if payment.state != 'failed':
-                            with Transaction().set_context(date=payment.date):
-                                payment_amount += Currency.compute(
-                                    payment.currency, payment.amount,
-                                    invoice.currency)
+                        with Transaction().set_context(date=payment.date):
+                            payment_amount += Currency.compute(
+                                payment.currency, payment.amount_line_paid,
+                                invoice.currency)
                     amounts[invoice.id] -= payment_amount
         return amounts

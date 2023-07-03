@@ -132,7 +132,6 @@ class Group(ModelSQL, ModelView):
             default = {}
         else:
             default = default.copy()
-        default.setdefault('number', None)
         default.setdefault('payments', None)
         return super(Group, cls).copy(groups, default=default)
 
@@ -327,6 +326,16 @@ class Payment(Workflow, ModelSQL, ModelView):
             ('succeeded', 'Succeeded'),
             ('failed', 'Failed'),
             ], 'State', readonly=True, select=True)
+
+    @property
+    def amount_line_paid(self):
+        if self.state != 'failed':
+            if self.line.second_currency:
+                payment_amount = abs(self.line.amount_second_currency)
+            else:
+                payment_amount = abs(self.line.credit - self.line.debit)
+            return max(min(self.amount, payment_amount), 0)
+        return Decimal(0)
 
     @classmethod
     def __setup__(cls):
@@ -539,11 +548,7 @@ class ProcessPayment(Wizard):
     process = StateAction('account_payment.act_payment_group_form')
 
     def _group_payment_key(self, payment):
-        return (
-            ('company', payment.company.id),
-            ('journal', payment.journal.id),
-            ('kind', payment.kind),
-            )
+        return (('journal', payment.journal.id), ('kind', payment.kind))
 
     def _new_group(self, values):
         pool = Pool()
@@ -579,3 +584,6 @@ class ProcessPayment(Wizard):
         return action, {
             'res_id': [g.id for g in groups],
             }
+
+    def default_start(self, name):
+        return {}
