@@ -270,6 +270,9 @@ class Main(Gtk.Application):
         self.current_page = 0
         self.last_page = 0
         self.dialogs = []
+        self._global_run = False
+        self._global_check_timeout_id = None
+        self._global_update_timeout_id = None
 
         # Register plugins
         tryton.plugins.register()
@@ -343,6 +346,8 @@ class Main(Gtk.Application):
 
         def update(widget, search_text, callback=None):
             def end():
+                self._global_update_timeout_id = None
+                self._global_run = False
                 if callback:
                     callback()
                 return False
@@ -362,6 +367,8 @@ class Main(Gtk.Application):
                 except RPCException:
                     result = []
                 if search_text != widget.get_text():
+                    self._global_update_timeout_id = None
+                    self._global_run = False
                     if callback:
                         callback()
                     return False
@@ -383,14 +390,34 @@ class Main(Gtk.Application):
                 widget.emit('changed')
                 end()
 
+            self._global_run = True
             RPCExecute('model', 'ir.model', 'global_search', search_text,
                 CONFIG['client.limit'], self.menu_screen.model_name,
                 context=self.menu_screen.context, callback=set_result)
             return False
 
+        def check_timeout(widget, search_text):
+            # This method tries to avoid multiple global_search queries running
+            # concurrently on the server by waiting that one is complete before
+            # sending another. If a query is made while another is already
+            # waiting, it replaces it. Ideally there should be locks on _global
+            # attributes updates, but it does not seem mandatory so we will add
+            # them later if needed
+            if self._global_run:
+                if self._global_check_timeout_id:
+                    GLib.source_remove(self._global_check_timeout_id)
+                self._global_check_timeout_id = GLib.timeout_add(500,
+                    check_timeout, widget, search_text)
+                return True
+            else:
+                self._global_update_timeout_id = GLib.timeout_add(500,
+                    update, widget, search_text)
+                self._global_check_timeout_id = None
+                return False
+
         def changed(widget):
             search_text = widget.get_text()
-            GLib.timeout_add(300, update, widget, search_text)
+            check_timeout(widget, search_text)
 
         def activate(widget):
             def message():
@@ -405,7 +432,8 @@ class Main(Gtk.Application):
         self.global_search_entry.connect('changed', changed)
         self.global_search_entry.connect('activate', activate)
 
-    def set_title(self, value=''):
+    # ABD: Add possibility to choose the business date
+    def set_title(self, value='', date=''):
         if CONFIG['login.profile']:
             login_info = CONFIG['login.profile']
         else:
@@ -416,7 +444,7 @@ class Main(Gtk.Application):
         titles = [CONFIG['client.title']]
         if value:
             titles.append(value)
-        self.header.set_title(' - '.join(titles))
+        self.header.set_title(' - '.join(titles) + ' (' + date + ')')
         self.header.set_subtitle(login_info)
         try:
             style_context = self.header.get_style_context()
@@ -505,7 +533,7 @@ class Main(Gtk.Application):
         page = self.notebook.get_current_page()
         self.notebook.set_current_page(page - 1)
 
-    def get_preferences(self):
+    def get_preferences(self, date=''):
         RPCContextReload()
         try:
             prefs = RPCExecute('model', 'res.user', 'get_preferences', False)
@@ -531,7 +559,15 @@ class Main(Gtk.Application):
         self.sig_win_menu(prefs=prefs)
         for action_id in prefs.get('actions', []):
             Action.execute(action_id, {})
-        self.set_title(prefs.get('status_bar', ''))
+        # XXX: add connection date
+        connection_date = date.strftime('%d/%m/%Y') if date else ''
+        self.set_title(prefs.get('status_bar', ''), connection_date)
+        # AKE: change bg color based on preferences
+        color_bg = prefs.get('color_bg', None
+            ) or os.environ.get('TRYTON_CLIENT_BG_COLOR', None)
+        if color_bg:
+            self.window.modify_bg(Gtk.StateType.NORMAL,
+                Gdk.color_parse(color_bg))
         if prefs and 'language' in prefs:
             translate.setlang(prefs['language'], prefs.get('locale'))
             if CONFIG['client.lang'] != prefs['language']:
@@ -707,6 +743,16 @@ class Main(Gtk.Application):
                 'id': record_id,
                 }, warning=False)
 
+    def menu_row_activate(self):
+        screen = self.menu_screen
+        record_id = (screen.current_record.id
+            if screen.current_record else None)
+        # ids is not defined to prevent to add suffix
+        return Action.exec_keyword('tree_open', {
+                'model': screen.model_name,
+                'id': record_id,
+                }, warning=False)
+
     def sig_win_menu(self, prefs=None):
         from tryton.gui.window.view_form.screen import Screen
 
@@ -731,7 +777,8 @@ class Main(Gtk.Application):
         ctx = rpc.CONTEXT.copy()
         decoder = PYSONDecoder(ctx)
         action_ctx = decoder.decode(action.get('pyson_context') or '{}')
-        domain = decoder.decode(action['pyson_domain'])
+        # Postpone domain eval
+        domain = action['pyson_domain']
         screen = Screen(action['res_model'], mode=['tree'], view_ids=view_ids,
             domain=domain, context=action_ctx, readonly=True, limit=None,
             row_activate=self.menu_row_activate)
@@ -1070,7 +1117,7 @@ class Main(Gtk.Application):
 
     def show_notification(self, title, msg, priority=1):
         notification = Gio.Notification.new(title)
-        notification.set_body(msg)
+        notification.set_body('\n'.join(msg))
         notification.set_priority(_PRIORITIES[priority])
         if sys.platform != 'win32' or GLib.glib_version >= (2, 57, 0):
             self.send_notification(None, notification)

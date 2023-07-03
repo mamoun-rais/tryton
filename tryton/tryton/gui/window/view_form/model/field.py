@@ -5,6 +5,7 @@ from itertools import chain
 import tempfile
 import logging
 import locale
+import logging
 from tryton.common import \
         domain_inversion, eval_domain, localize_domain, \
         merge, inverse_leaf, filter_leaf, prepare_reference_domain, \
@@ -90,6 +91,10 @@ class Field(object):
         if bool(int(state_attrs.get('required') or 0)):
             if (self._is_empty(record)
                     and not bool(int(state_attrs.get('readonly') or 0))):
+                logging.getLogger('root').debug('Field %s required on %s : '
+                    'states : %s'
+                    % (self.name, record.model_name,
+                        str(self.attrs.get('states', {}))))
                 return False
         return True
 
@@ -102,11 +107,17 @@ class Field(object):
         if not softvalidation:
             if not self.check_required(record):
                 invalid = 'required'
+                logging.getLogger('root').debug('Field %s of %s is required' %
+                    (self.name, record.model_name))
         if isinstance(domain, bool):
             if not domain:
                 invalid = 'domain'
+                logging.getLogger('root').debug('Invalid domain on Field %s of'
+                    ' %s : %s' % (self.name, record.model_name, str(domain)))
         elif domain == [('id', '=', None)]:
             invalid = 'domain'
+            logging.getLogger('root').debug('Invalid domain on Field %s of'
+                ' %s : %s' % (self.name, record.model_name, str(domain)))
         else:
             unique, leftpart, value = unique_value(domain)
             if unique:
@@ -118,8 +129,9 @@ class Field(object):
                     # XXX to remove once server domains are fixed
                     value = None
                 setdefault = True
-                if record.group.domain:
-                    original_domain = merge(record.group.domain)
+                group_domain = record.group.get_domain()
+                if group_domain:
+                    original_domain = merge(group_domain)
                 else:
                     original_domain = merge(domain)
                 domain_readonly = original_domain[0] == 'AND'
@@ -137,6 +149,8 @@ class Field(object):
                         domain_readonly)
             if not eval_domain(domain, EvalEnvironment(record)):
                 invalid = domain
+                logging.getLogger('root').debug('Invalid domain on Field %s of'
+                    ' %s : %s' % (self.name, record.model_name, str(domain)))
         self.get_state_attrs(record)['invalid'] = invalid
         return not invalid
 
@@ -508,12 +522,10 @@ class O2MField(Field):
         parent.signal('record-changed')
 
     def _group_list_changed(self, group, signal):
-        if group.model_name == group.parent.model_name:
-            group.parent.group.signal('group-list-changed', signal)
+        group.parent.group.signal('group-list-changed', signal)
 
     def _group_cleared(self, group, signal):
-        if group.model_name == group.parent.model_name:
-            group.parent.signal('group-cleared')
+        group.parent.signal('group-cleared')
 
     def _record_modified(self, group, record):
         if not record.parent:
@@ -843,7 +855,7 @@ class ReferenceField(Field):
                         pass
                 if '%s,%s' % (ref_model, ref_id) == self.get(record):
                     rec_name = record.value.get(
-                        self.name + '.', {}).get('rec_name') or ''
+                        self.name + '.', {}).get('rec_name', '')
                 else:
                     rec_name = ''
             record.value.setdefault(self.name + '.', {})['rec_name'] = rec_name
@@ -878,7 +890,7 @@ class ReferenceField(Field):
         elif ref_model:
             rec_name = ''
         else:
-            rec_name = str(ref_id) if ref_id is not None else ''
+            rec_name = str(ref_id)
         record.value[self.name] = ref_model, ref_id
         record.value.setdefault(self.name + '.', {})['rec_name'] = rec_name
 

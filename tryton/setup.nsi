@@ -14,19 +14,19 @@
 !include "MUI.nsh"
 
 ;General
-Name "Tryton ${VERSION}"
-OutFile "tryton-${VERSION}.exe"
+Name "Coog ${VERSION}"
+OutFile "coog-setup-${VERSION}.exe"
 SetCompressor lzma
 SetCompress auto
 Unicode true
 
 ;Default installation folder
-InstallDir "$PROGRAMFILES\Tryton-${SERIES}"
+InstallDir "$PROGRAMFILES\coog-${VERSION}"
 
 ;Get installation folder from registry if available
-InstallDirRegKey HKCU "Software\Tryton-${SERIES}" ""
+InstallDirRegKey HKCU "Software\coog-${VERSION}" ""
 
-BrandingText "Tryton ${SERIES}"
+BrandingText "Coog ${VERSION}"
 
 ;Vista redirects $SMPROGRAMS to all users without this
 RequestExecutionLevel admin
@@ -62,8 +62,6 @@ Var STARTMENU_FOLDER
 
 !insertmacro MUI_LANGUAGE "English" ; First is the default
 !include "english.nsh"
-!insertmacro MUI_LANGUAGE "Catalan"
-!include "catalan.nsh"
 !insertmacro MUI_LANGUAGE "French"
 !include "french.nsh"
 !insertmacro MUI_LANGUAGE "German"
@@ -85,14 +83,14 @@ Var STARTMENU_FOLDER
 ;Installer Sections
 Function .onInit
     ClearErrors
-    ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\tryton-${SERIES}" "UninstallString"
+    ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\coog-${SERIES}" "UninstallString"
     StrCmp $0 "" DoInstall
 
     MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(PreviousInstall)" /SD IDOK IDOK Uninstall
     Quit
 
     Uninstall:
-        ReadRegStr $1 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\tryton-${SERIES}" "InstallLocation"
+        ReadRegStr $1 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\coog-${SERIES}" "InstallLocation"
         ClearErrors
         StrCpy $2 "/S"
         IfSilent +2
@@ -103,7 +101,7 @@ Function .onInit
     DoInstall:
 FunctionEnd
 
-Section $(SecTrytonName) SecTryton
+Section $(SecCoogName) SecCoog
 SectionIn 1 2 RO
     ;Set output path to the installation directory
     SetOutPath "$INSTDIR"
@@ -118,18 +116,18 @@ SectionIn 1 2 RO
     File /r "doc\*"
 
     ;Register URL protocol
-    WriteRegStr HKCR "tryton" "" "URL:Tryton Protocol"
-    WriteRegStr HKCR "tryton" "URL Protocol" ""
-    WriteRegStr HKCR "tryton\DefaultIcon" "" "$INSTDIR\tryton.exe,1"
-    WriteRegStr HKCR "tryton\shell\open\command" "" '$INSTDIR\tryton.exe "%1"'
+    WriteRegStr HKCR "coog" "" "URL:Coog Protocol"
+    WriteRegStr HKCR "coog" "URL Protocol" ""
+    WriteRegStr HKCR "coog\DefaultIcon" "" "$INSTDIR\coog.exe,1"
+    WriteRegStr HKCR "coog\shell\open\command" "" '$INSTDIR\coog.exe "%1"'
 
     ;Write the installation path into the registry
-    WriteRegStr HKLM "Software\Tryton-${SERIES}" "" $INSTDIR
+    WriteRegStr HKLM "Software\coog-${SERIES}" "" $INSTDIR
 
     ;Write the uninstall keys for Windows
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\tryton-${SERIES}" "DisplayName" "Tryton ${VERSION} (remove only)"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\tryton-${SERIES}" "UninstallString" "$INSTDIR\uninstall.exe"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\tryton-${SERIES}" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\coog-${SERIES}" "DisplayName" "Coog ${VERSION} (remove only)"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\coog-${SERIES}" "UninstallString" "$INSTDIR\uninstall.exe"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\coog-${SERIES}" "InstallLocation" "$INSTDIR"
 
     ;Create the uninstaller
     WriteUninstaller uninstall.exe
@@ -143,8 +141,8 @@ SectionIn 1 2
 
         CreateDirectory "$SMPROGRAMS\$STARTMENU_FOLDER"
         CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Uninstall.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe" 0
-        CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Tryton-${SERIES}.lnk" "$INSTDIR\tryton.exe" "" "$INSTDIR\tryton.exe" 0
-        CreateShortCut "$DESKTOP\Tryton-${SERIES}.lnk" "$INSTDIR\tryton.exe" "" "$INSTDIR\tryton.exe" 0
+        CreateShortCut "$SMPROGRAMS\$STARTMENU_FOLDER\Coog-${SERIES}.lnk" "$INSTDIR\coog.exe" "" "$INSTDIR\coog.exe" 0
+        CreateShortCut "$DESKTOP\Coog-${SERIES}.lnk" "$INSTDIR\coog.exe" "" "$INSTDIR\coog.exe" 0
 
     !insertmacro MUI_STARTMENU_WRITE_END
 
@@ -152,7 +150,7 @@ SectionEnd
 
 ;Descriptions
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SecTryton} $(SecTrytonDesc)
+    !insertmacro MUI_DESCRIPTION_TEXT ${SecCoog} $(SecCoogDesc)
     !insertmacro MUI_DESCRIPTION_TEXT ${SecStartMenu} $(SecStartMenuDesc)
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
@@ -161,17 +159,17 @@ Section "Uninstall"
     RMDIR /r "$INSTDIR"
 
     ;remove registry keys
-    DeleteRegKey HKLM "Software\Tryton-${SERIES}"
-    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\tryton-${SERIES}"
+    DeleteRegKey HKLM "Software\Coog-${SERIES}"
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\coog-${SERIES}"
 
     SetShellVarContext all
-    Delete "$DESKTOP\Tryton-${SERIES}.lnk"
+    Delete "$DESKTOP\Coog-${SERIES}.lnk"
 
     !insertmacro MUI_STARTMENU_GETFOLDER Application $MUI_TEMP
 
     StrCmp $MUI_TEMP "" noshortcuts
         Delete "$SMPROGRAMS\$MUI_TEMP\Uninstall.lnk"
-        Delete "$SMPROGRAMS\$MUI_TEMP\Tryton-${SERIES}.lnk"
+        Delete "$SMPROGRAMS\$MUI_TEMP\Coog-${SERIES}.lnk"
         RMDir "$SMPROGRAMS\$MUI_TEMP"
     noshortcuts:
 

@@ -78,9 +78,11 @@ class EditableTreeView(TreeView):
     leaving_events = leaving_record_events + (
         Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Enter)
 
-    def __init__(self, position, view):
+    def __init__(self, position, view, editable_open=False):
         super(EditableTreeView, self).__init__(view)
         self.editable = position
+        self.editable_open = editable_open
+        self.view = view
 
     def on_quit_cell(
             self, current_record, column, renderer, value, callback=None):
@@ -157,8 +159,7 @@ class EditableTreeView(TreeView):
         return True
 
     def on_keypressed(self, entry, event, renderer):
-        path = self.get_cursor()[0]
-        column = self.get_column_from_renderer(renderer)
+        path, column = self.get_cursor()
         model = self.get_model()
         record = model.get_value(model.get_iter(path), 0)
         self.display_counter += 1  # Force a display
@@ -194,6 +195,9 @@ class EditableTreeView(TreeView):
                     model = entry.get_model()
                     index = entry.get_property('entry-text-column')
                     txt = model[active][index]
+                # It seems that the remove-widget signal is only sent when
+                # activating the combobox or when pressing escape.
+                GLib.idle_add(entry.emit, 'remove-widget')
             else:
                 return True
             keyval = event.keyval
@@ -301,10 +305,9 @@ class EditableTreeView(TreeView):
         return new_path
 
     def on_editing_done(self, entry, renderer):
-        path = self.get_cursor()[0]
+        path, column = self.get_cursor()
         if not path:
             return True
-        column = self.get_column_from_renderer(renderer)
         model = self.get_model()
         record = model.get_value(model.get_iter(path), 0)
         if isinstance(entry, (Date, Time)):
@@ -312,17 +315,9 @@ class EditableTreeView(TreeView):
             text = entry.props.value
         elif isinstance(entry, Gtk.ComboBox):
             model = entry.get_model()
-            iter_ = entry.get_active_iter()
-            if iter_:
-                text = model.get_value(iter_, entry.props.entry_text_column)
-            else:
-                text = ''
+            text = model.get_value(
+                entry.get_active_iter(),
+                entry.props.entry_text_column)
         else:
             text = entry.get_text()
         self.on_quit_cell(record, column, renderer, text)
-
-    def get_column_from_renderer(self, renderer):
-        for column in self.get_columns():
-            for cell in column.get_cells():
-                if cell == renderer:
-                    return column

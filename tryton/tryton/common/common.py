@@ -130,7 +130,10 @@ class IconFactory:
             try:
                 ET.register_namespace('', 'http://www.w3.org/2000/svg')
                 root = ET.fromstring(data)
-                root.attrib['fill'] = color
+                # If the color is set on the icon, we get it otherwise we take
+                # the color defined by default
+                if not root.attrib.get('fill'):
+                    root.attrib['fill'] = color
                 if badge:
                     if not isinstance(badge, str):
                         try:
@@ -482,11 +485,13 @@ def file_open(filename, type=None, print_p=False):
             save()
 
 
-def mailto(to=None, cc=None, subject=None, body=None, attachment=None):
+def mailto(to=None, cc=None, bcc=None, subject=None, body=None,
+        attachment=None):
     if CONFIG['client.email']:
         cmd = Template(CONFIG['client.email']).substitute(
                 to=to or '',
                 cc=cc or '',
+                bcc=bcc or '',
                 subject=subject or '',
                 body=body or '',
                 attachment=attachment or '',
@@ -498,6 +503,8 @@ def mailto(to=None, cc=None, subject=None, body=None, attachment=None):
         args = ['xdg-email', '--utf8']
         if cc:
             args.extend(['--cc', cc])
+        if bcc:
+            args.extend(['--bcc', bcc])
         if subject:
             args.extend(['--subject', subject])
         if body:
@@ -518,6 +525,8 @@ def mailto(to=None, cc=None, subject=None, body=None, attachment=None):
     url += '?'
     if cc:
         url += "&cc=" + urllib.parse.quote(cc, "@,")
+    if bcc:
+        url += "&bcc=" + urllib.parse.quote(bcc, "@,")
     if subject:
         url += "&subject=" + urllib.parse.quote(subject, "")
     if body:
@@ -591,10 +600,13 @@ class UserWarningDialog(WarningDialog):
 
     def build_dialog(self, *args, **kwargs):
         dialog = super().build_dialog(*args, **kwargs)
-        self.always = Gtk.CheckButton(label=_('Always ignore this warning.'))
-        alignment = Gtk.Alignment(xalign=0, yalign=0.5)
-        alignment.add(self.always)
-        dialog.vbox.pack_start(alignment, expand=True, fill=False, padding=0)
+
+        # Coog: Disable Warning Automatic By Pass
+        # self.always = Gtk.CheckButton(label=_('Always ignore this warning.'))
+        # alignment = Gtk.Alignment(xalign=0, yalign=0.5)
+        # alignment.add(self.always)
+        # dialog.vbox.pack_start(alignment, expand=True, fill=False, padding=0)
+
         label = Gtk.Label(
             label=_('Do you want to proceed?'), halign=Gtk.Align.END)
         dialog.vbox.pack_start(label, expand=True, fill=True, padding=0)
@@ -602,8 +614,9 @@ class UserWarningDialog(WarningDialog):
 
     def process_response(self, response):
         if response == Gtk.ResponseType.YES:
-            if self.always.get_active():
-                return 'always'
+            # Coog: Disable Warning Automatic By Pass
+            # if self.always.get_active():
+            #     return 'always'
             return 'ok'
         return 'cancel'
 
@@ -796,7 +809,7 @@ def check_version(box, version=__version__):
     filename = 'tryton-%s.tar.gz' % version
     if hasattr(sys, 'frozen'):
         if sys.platform == 'win32':
-            filename = 'tryton-%s.exe' % version
+            filename = 'tryton-setup-%s.exe' % version
         elif sys.platform == 'darwin':
             filename = 'tryton-%s.dmg' % version
     url = list(urllib.parse.urlparse(CONFIG['download.url']))
@@ -1064,6 +1077,8 @@ def RPCContextReload(callback=None):
             rpc.CONTEXT.update(context())
         except RPCException:
             pass
+        if rpc._CLIENT_DATE:
+            rpc.CONTEXT['client_defined_date'] = rpc._CLIENT_DATE
         if callback:
             callback()
     # Use RPCProgress to not send rpc.CONTEXT
@@ -1074,6 +1089,8 @@ def RPCContextReload(callback=None):
     if not callback:
         rpc.context_reset()
         rpc.CONTEXT.update(context)
+        if rpc._CLIENT_DATE:
+            rpc.CONTEXT['client_defined_date'] = rpc._CLIENT_DATE
 
 
 class Tooltips(object):
@@ -1095,6 +1112,29 @@ class Tooltips(object):
             self._tooltips.disable()
 
 
+FORMAT_ERROR = "Wrong key format [type_]style_value: "
+
+# Color values: min = 0 max = 65535
+# You need to apply the percent to get the right color
+# http://www.december.com/html/spec/colorcodes.html
+
+COLOR_RGB = {
+    'red': [65535, 0, 0],
+    'green': [0, 65535, 0],
+    'blue': [0, 0, 65535],
+    'turquoise': [16383, 57670, 53738],
+    'gray': [49151, 49151, 49151],
+    'brown': [42597, 10485, 10485],
+    'maroon': [45219, 12451, 24903],
+    'violet': [60947, 33422, 60947],
+    'purple': [41287, 8519, 61602],
+    'yellow': [65535, 65535, 0],
+    'pink': [65535, 49151, 52428],
+    'beige': [62913, 62913, 56360],
+    'white': [65535, 65535, 65535],
+    'black': [0, 0, 0]
+}
+
 COLOR_SCHEMES = {
     'red': '#cf1d1d',
     'green': '#3fb41b',
@@ -1102,6 +1142,11 @@ COLOR_SCHEMES = {
     'grey': '#444444',
     'black': '#000000',
     'darkcyan': '#305755',
+}
+
+COLORS = {
+    'invalid': '#ff6969',
+    'required': '#d2d2ff',
 }
 
 

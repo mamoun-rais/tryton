@@ -11,7 +11,7 @@ from gi.repository import Gdk, GLib, Gtk
 from tryton.gui.window.win_search import WinSearch
 from tryton.gui.window.win_form import WinForm
 from tryton.gui.window.view_form.screen import Screen
-from tryton.common import file_selection, file_open, file_write
+from tryton.common import COLORS, file_selection, file_open, file_write
 import tryton.common as common
 from tryton.common.cellrendererbutton import CellRendererButton
 from tryton.common.cellrenderertext import CellRendererText, \
@@ -95,7 +95,8 @@ class CellCache(list):
                 self.cell_caches = {}
             record = store.get_value(iter_, 0)
             counter = self.view.treeview.display_counter
-            if (self.display_counters.get(record.id) != counter):
+            if (self.display_counters.get((record.model_name, record.id)) !=
+                    counter):
                 if getattr(cell, 'decorated', None):
                     func(self, column, cell, store, iter_, user_data)
                 else:
@@ -103,10 +104,11 @@ class CellCache(list):
                     cache.decorate(cell)
                     func(self, column, cell, store, iter_, user_data)
                     cache.undecorate(cell)
-                    self.cell_caches[record.id] = cache
-                    self.display_counters[record.id] = counter
+                    self.cell_caches[(record.model_name, record.id)] = cache
+                    self.display_counters[(record.model_name, record.id)] = \
+                        counter
             else:
-                self.cell_caches[record.id].apply(cell)
+                self.cell_caches[(record.model_name, record.id)].apply(cell)
         return wrapper
 
 
@@ -133,8 +135,18 @@ class Cell(object):
         field = record[self.attrs['name']]
         return record, field
 
-    def set_editable(self, record):
+    def _get_record_field_from_path(self, path, store=None):
+        if not store:
+            store = self.view.treeview.get_model()
+        record = store.get_value(store.get_iter(path), 0)
+        field = record.group.fields[self.attrs['name']]
+        return record, field
+
+    def set_editable(self):
         pass
+
+    def get_color(self, record):
+        return record.expr_eval(self.view.attributes.get('colors', '"black"'))
 
 
 class Affix(Cell):
@@ -176,6 +188,12 @@ class Affix(Cell):
             if not text:
                 text = field.get_client(record) or ''
             cell.set_property('text', text)
+            fg_color = self.get_color(record)
+            cell.set_property('foreground', fg_color)
+            if fg_color == 'black':
+                cell.set_property('foreground-set', False)
+            else:
+                cell.set_property('foreground-set', True)
 
     def clicked(self, renderer, path):
         record, field = self._get_record_field_from_path(path)
@@ -193,6 +211,7 @@ class Affix(Cell):
 class GenericText(Cell):
     align = 0
     editable = None
+    editing = None
 
     def __init__(self, view, attrs, renderer=None):
         super(GenericText, self).__init__()
@@ -229,6 +248,12 @@ class GenericText(Cell):
                     (CellRendererText, CellRendererDate, CellRendererCombo)):
                 cell.set_property('strikethrough', record.deleted)
             cell.set_property('text', text)
+            fg_color = self.get_color(record)
+            cell.set_property('foreground', fg_color)
+            if fg_color == 'black':
+                cell.set_property('foreground-set', False)
+            else:
+                cell.set_property('foreground-set', True)
 
         field = record[self.attrs['name']]
 
@@ -253,6 +278,21 @@ class GenericText(Cell):
             if invisible:
                 readonly = True
 
+            if not isinstance(cell, CellRendererToggle):
+                bg_color = 'white'
+                if field.get_state_attrs(record).get('invalid', False):
+                    bg_color = COLORS.get('invalid', 'white')
+                elif bool(int(
+                            field.get_state_attrs(record).get('required', 0))):
+                    bg_color = COLORS.get('required', 'white')
+                cell.set_property('background', bg_color)
+                if bg_color == 'white':
+                    cell.set_property('background-set', False)
+                else:
+                    cell.set_property('background-set', True)
+                    cell.set_property('foreground-set',
+                        not (record.deleted or record.removed))
+
             if isinstance(cell, CellRendererToggle):
                 cell.set_property('activatable', not readonly)
             elif isinstance(cell,
@@ -264,6 +304,49 @@ class GenericText(Cell):
         else:
             if isinstance(cell, CellRendererToggle):
                 cell.set_property('activatable', False)
+        # ABD See #3428
+        self._format_set(record, field, cell)
+        cell.set_property('xalign', self.align)
+
+    def _set_foreground(self, value, cell):
+        cell.set_property('foreground', value)
+
+    def _set_background(self, value, cell):
+        cell.set_property('background', value)
+
+    def _set_font(self, value, cell):
+        cell.set_property('font', value)
+
+    def _format_set(self, record, field, cell):
+        functions = {
+            'color': self._set_foreground,
+            'fg': self._set_foreground,
+            'bg': self._set_background,
+            'font': self._set_font
+            }
+        attrs = record.expr_eval(field.get_state_attrs(record).
+            get('states', {}))
+        states = record.expr_eval(self.attrs.get('states', {})).copy()
+        states.update(attrs)
+        if isinstance(cell, CellRendererText) and \
+                cell.get_property('font') != 'Normal':
+            cell.set_property('font', 'Normal')
+        for attr in list(states.keys()):
+            if not states[attr]:
+                continue
+            key = attr.split('_')
+            if key[0] == 'field':
+                key = key[1:]
+            if key[0] == 'label':
+                continue
+            if isinstance(states[attr], str):
+                key.append(states[attr])
+            if key[0] in functions:
+                if len(key) != 2:
+                    err = 'Wrong key format [type]_[style]_[value]: '
+                    err += attr
+                    raise ValueError(err)
+                functions[key[0]](key[1], cell)
 
     def open_remote(self, record, create, changed=False, text=None,
             callback=None):
@@ -280,15 +363,18 @@ class GenericText(Cell):
         if callback:
             callback()
 
-    def set_editable(self, record):
-        if not record or not self.editable:
+    def set_editable(self):
+        if not self.editable or not self.editing:
             return
+        record, field = self.editing
         self.editable.set_text(self.get_textual_value(record))
 
     def editing_started(self, cell, editable, path):
         def remove(editable):
             self.editable = None
+            self.editing = None
         self.editable = editable
+        self.editing = self._get_record_field_from_path(path)
         editable.connect('remove-widget', remove)
         return False
 
@@ -346,6 +432,9 @@ class Boolean(GenericText):
             record[self.attrs['name']].set_client(record, int(not value))
             self.view.treeview.set_cursor(path)
         return True
+
+    def set_editable(self):
+        pass
 
 
 class URL(Char):
@@ -959,11 +1048,11 @@ class Selection(GenericText, SelectionMixin, PopdownMixin):
         if callback:
             callback()
 
-    def set_editable(self, record):
-        if not record or not self.editable:
+    def set_editable(self):
+        if not self.editable or not self.editing:
             return
-        field = record[self.attrs['name']]
-        value = self.get_value(record, field)
+        record, field = self.editing
+        value = field.get(record)
         self.update_selection(record, field)
         self.set_popdown_value(self.editable, value)
 

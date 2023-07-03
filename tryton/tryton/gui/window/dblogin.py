@@ -5,12 +5,15 @@ import configparser
 import os
 import gettext
 import threading
+import datetime
 import logging
 
 from gi.repository import GLib, GObject, Gtk
 
+
 from tryton import __version__
 import tryton.common as common
+from tryton.common.datetime_ import Date
 from tryton.config import CONFIG, TRYTON_ICON, PIXMAPS_DIR, get_config_dir
 import tryton.rpc as rpc
 from tryton.common.underline import set_underline
@@ -479,6 +482,17 @@ class DBLogin(object):
         label_username.set_mnemonic_widget(self.entry_login)
         grid.attach(label_username, 0, 5, 1, 1)
 
+        # Date stuff
+        if CONFIG['login.date']:
+            self.label_date = Gtk.Label(
+                label=set_underline(_("Date:")),
+                use_underline=True, halign=Gtk.Align.END)
+            grid.attach(self.label_date, 0, 6, 1, 1)
+            self.entry_date = Date()
+            self.entry_date.props.format = '%d/%m/%Y'
+            self.entry_date.props.value = datetime.date.today()
+            grid.attach(self.entry_date, 1, 6, 2, 1)
+
         # Profile information
         self.profile_cfg = os.path.join(get_config_dir(), 'profiles.cfg')
         self.profiles = configparser.ConfigParser()
@@ -640,6 +654,8 @@ class DBLogin(object):
             result = (
                 hostname, port, database, self.entry_login.get_text())
 
+        if CONFIG['login.date']:
+            CONFIG['login.date'] = self.entry_date.props.value
         self.dialog.destroy()
         self._window.destroy()
         return response == Gtk.ResponseType.OK

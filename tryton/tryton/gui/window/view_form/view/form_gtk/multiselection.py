@@ -43,6 +43,9 @@ class MultiSelection(Widget, SelectionMixin):
         self.init_selection()
         self.id2path = {}
 
+    def _color_widget(self):
+        return self.tree
+
     def _readonly_set(self, readonly):
         super(MultiSelection, self)._readonly_set(readonly)
         selection = self.tree.get_selection()

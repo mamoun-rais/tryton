@@ -64,6 +64,8 @@ class Wizard(InfoBar):
         self.context['active_ids'] = self.ids
         self.context['active_model'] = self.model
         self.context['action_id'] = self.action_id
+        self.context['direct_print'] = self.direct_print
+        self.context['email_print'] = self.email_print
 
         def callback(result):
             try:
@@ -131,6 +133,9 @@ class Wizard(InfoBar):
                     del context['active_ids']
                     del context['active_model']
                     del context['action_id']
+                    del context['direct_print']
+                    del context['email_print']
+
                     Action._exec_action(*action, context=context)
 
             if self.state == self.end_state:
@@ -382,11 +387,14 @@ class WizardDialog(Wizard, NoModal):
         else:
             dialog = self.page
         screen = getattr(dialog, 'screen', None)
-        if self.sensible_widget == main.window:
+        # JMO: the conditions added on 'reload' are needed
+        # for https://support.coopengo.com/issues/12986
+        if action != 'reload' and self.sensible_widget == main.window:
             screen = main.menu_screen
         if screen:
             if (screen.current_record
-                    and self.sensible_widget != main.window):
+                    and self.sensible_widget != main.window or
+                    action == 'reload'):
                 if screen.model_name == self.model:
                     ids = self.ids
                 else:

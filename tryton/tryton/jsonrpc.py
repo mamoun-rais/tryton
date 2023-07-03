@@ -17,7 +17,8 @@ from functools import partial
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import reduce
-from urllib.parse import urljoin, quote
+from urllib.parse import urljoin, quote, urlparse
+from urllib.request import getproxies
 
 __all__ = ["ResponseError", "Fault", "ProtocolError", "Transport",
     "ServerProxy", "ServerPool"]
@@ -139,6 +140,47 @@ class Transport(xmlrpc.client.SafeTransport):
         self.__fingerprints = fingerprints
         self.__ca_certs = ca_certs
         self.session = session
+        self.set_proxies()
+
+    def set_proxies(self):
+        self.http_proxy = None
+        self.https_proxy = None
+        from tryton.config import CONFIG
+        self.use_proxy = CONFIG['proxy.active']
+        if not self.use_proxy:
+            return
+        try:
+            self.__proxies = getproxies()
+        except Exception:
+            self.__proxies = None
+            return
+        try:
+            self.http_proxy = self.__proxies['http']
+        except KeyError:
+            pass
+        try:
+            # https proxy is not used for now
+            self.https_proxy = self.__proxies['https']
+        except KeyError:
+            pass
+
+    def get_proxy_headers(self):
+        from tryton.config import CONFIG
+        username = CONFIG['proxy.username']
+        password = CONFIG['proxy.password']
+
+        if username is not None and password is not None:
+            puser_pass = base64.encodestring('%s:%s' % (username,
+                    password)).strip()
+            headers = {
+                'User-agent': self.user_agent,
+                'Proxy-authorization': 'Basic ' + puser_pass
+            }
+        else:
+            headers = {
+                'User-agent': self.user_agent,
+            }
+        return headers
 
     def getparser(self):
         target = JSONUnmarshaller()
@@ -162,6 +204,9 @@ class Transport(xmlrpc.client.SafeTransport):
             self, host)
         if extra_headers is None:
             extra_headers = []
+            proxy_headers = self.get_proxy_headers()
+            for key, value in proxy_headers.items():
+                extra_headers.append((key, value))
         if self.session:
             auth = base64.encodebytes(
                 self.session.encode('utf-8')).decode('ascii')
@@ -196,9 +241,23 @@ class Transport(xmlrpc.client.SafeTransport):
                 self.sock = ssl_ctx.wrap_socket(
                     sock, server_hostname=self.host)
 
+        def set_connection(ConnectionClass):
+            if self.http_proxy:
+                netloc = urlparse(self.http_proxy).netloc
+                proxy_host, proxy_port = netloc.split(':')
+                real_host, real_port = host.split(':')
+                proxy_port = int(proxy_port)
+                real_port = int(real_port)
+                self._connection = host, ConnectionClass(proxy_host,
+                    proxy_port, timeout=CONNECT_TIMEOUT)
+                self._connection[1].set_tunnel(real_host, real_port,
+                    self.get_proxy_headers())
+            else:
+                self._connection = host, ConnectionClass(host,
+                    timeout=CONNECT_TIMEOUT)
+
         def http_connection():
-            self._connection = host, http.client.HTTPConnection(host,
-                timeout=CONNECT_TIMEOUT)
+            set_connection(http.client.HTTPConnection)
             self._connection[1].connect()
             sock = self._connection[1].sock
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)

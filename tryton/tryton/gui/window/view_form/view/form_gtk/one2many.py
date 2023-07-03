@@ -3,7 +3,7 @@
 import gettext
 import itertools
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, Gtk, GLib
 
 from .widget import Widget
 from tryton.gui.window.view_form.screen import Screen
@@ -81,7 +81,8 @@ class One2Many(Widget):
             self.wid_text = Gtk.Entry()
             self.wid_text.set_placeholder_text(_('Search'))
             self.wid_text.set_property('width_chars', 13)
-            self.wid_text.connect('focus-out-event', self._focus_out)
+            self.pid_focus = self.wid_text.connect('focus-out-event',
+                self._focus_out)
             hbox.pack_start(self.wid_text, expand=True, fill=True, padding=0)
 
             if int(self.attrs.get('completion', 1)):
@@ -153,8 +154,12 @@ class One2Many(Widget):
 
         frame = Gtk.Frame()
         frame.add(hbox)
-        frame.set_shadow_type(Gtk.ShadowType.OUT)
-        vbox.pack_start(frame, expand=False, fill=True, padding=0)
+        # XXX: support expand_toolbar
+        if attrs.get('expand_toolbar'):
+            frame.set_shadow_type(Gtk.ShadowType.NONE)
+        else:
+            frame.set_shadow_type(Gtk.ShadowType.OUT)
+            vbox.pack_start(frame, expand=False, fill=True, padding=0)
 
         self.screen = Screen(attrs['relation'],
             mode=attrs.get('mode', 'tree,form').split(','),
@@ -165,6 +170,10 @@ class One2Many(Widget):
             limit=None)
         self.screen.pre_validate = bool(int(attrs.get('pre_validate', 0)))
         self.screen.signal_connect(self, 'record-message', self._sig_label)
+        if self.attrs.get('group'):
+            self.screen.signal_connect(self, 'current-record-changed',
+                lambda screen, _: GLib.idle_add(self.group_sync, screen,
+                    screen.current_record))
 
         vbox.pack_start(self.screen.widget, expand=True, fill=True, padding=0)
 
@@ -176,6 +185,11 @@ class One2Many(Widget):
             self.wid_text.connect('key_press_event', self.on_keypress)
 
         but_switch.props.sensitive = self.screen.number_of_views > 1
+
+    def _color_widget(self):
+        if hasattr(self.screen.current_view, 'treeview'):
+            return self.screen.current_view.treeview
+        return super(One2Many, self)._color_widget()
 
     def on_keypress(self, widget, event):
         if ((event.keyval == Gdk.KEY_F3)
@@ -220,7 +234,7 @@ class One2Many(Widget):
 
     def destroy(self):
         if self.attrs.get('add_remove'):
-            self.wid_text.disconnect_by_func(self._focus_out)
+            self.wid_text.disconnect(self.pid_focus)
         self.screen.destroy()
 
     def _on_activate(self):
@@ -228,6 +242,7 @@ class One2Many(Widget):
 
     def switch_view(self, widget):
         self.screen.switch_view()
+
         mnemonic_widget = self.screen.current_view.mnemonic_widget
         string = self.attrs.get('string', '')
         if mnemonic_widget:
@@ -237,7 +252,9 @@ class One2Many(Widget):
 
     @property
     def modified(self):
-        return self.screen.current_view.modified
+        # JCA : Check current_view is not None
+        return (self.screen.current_view.modified if self.screen.current_view
+            else False)
 
     def _readonly_set(self, value):
         self._readonly = value
@@ -263,6 +280,9 @@ class One2Many(Widget):
             o2m_size = None
             size_limit = False
 
+        has_form = ('form' in (x.view_type for x in self.screen.views)
+            or 'form' in self.screen.view_to_load)
+
         first = last = False
         if isinstance(self._position, int):
             first = self._position <= 1
@@ -272,7 +292,8 @@ class One2Many(Widget):
                 not self._readonly
                 and self.attrs.get('create', True)
                 and not size_limit
-                and access['create']))
+                and access['create']
+                and (has_form or self.screen.current_view.editable)))
         self.but_del.set_sensitive(bool(
                 not self._readonly
                 and self.attrs.get('delete', True)
@@ -284,7 +305,8 @@ class One2Many(Widget):
                 and self._position))
         self.but_open.set_sensitive(bool(
                 self._position
-                and access['read']))
+                and access['read']
+                and has_form))
         self.but_next.set_sensitive(bool(
                 self._position
                 and not last))
@@ -344,10 +366,19 @@ class One2Many(Widget):
             if sequence:
                 self.screen.group.set_sequence(field=sequence)
 
-        if self.screen.current_view.editable:
-            self.screen.new()
-            self.screen.current_view.widget.set_sensitive(True)
-            update_sequence()
+        for widget in [self] + self.view.widgets[self.field_name]:
+            if ((self.attrs.get('group')
+                        and widget.attrs.get('group') != self.attrs['group'])
+                    or not widget.visible
+                    or not hasattr(widget, 'screen')):
+                continue
+            if (widget.screen.current_view.view_type == 'form'
+                    or widget.screen.current_view.editable and
+                    not widget.screen.editable_open_get()):
+                widget.screen.new()
+                widget.screen.current_view.widget.set_sensitive(True)
+                update_sequence()
+                break
         else:
             field_size = self.record.expr_eval(self.attrs.get('size')) or -1
             field_size -= len(self.field.get_eval(self.record)) + 1
@@ -407,7 +438,7 @@ class One2Many(Widget):
         search_set()
 
     def _sig_edit(self, widget=None):
-        if not common.MODELACCESS[self.screen.model_name]['read']:
+        if not self.but_open.props.sensitive:
             return
         if not self._validate():
             return
@@ -445,7 +476,6 @@ class One2Many(Widget):
         access = common.MODELACCESS[self.screen.model_name]
         if not access['write'] or not access['read']:
             return
-        self.view.set_value()
         domain = self.field.domain_get(self.record)
         context = self.field.get_search_context(self.record)
         domain = [domain, self.record.expr_eval(self.attrs.get('add_remove'))]
@@ -489,6 +519,54 @@ class One2Many(Widget):
         self.label.set_text(line)
         self._set_button_sensitive()
 
+    def group_sync(self, screen, current_record):
+        if not self.view or not self.view.widgets:
+            return
+        if self.attrs.get('mode') == 'form':
+            return
+        if screen.current_record != current_record:
+            return
+
+        def is_compatbile(screen, record):
+            return not (screen.current_view.view_type == 'form'
+                and record is not None
+                and screen.model_name != record.model_name)
+
+        current_record = self.screen.current_record
+        to_sync = []
+        for widget in self.view.widgets[self.field_name]:
+            if (widget == self
+                    or widget.attrs.get('group') != self.attrs['group']
+                    or not hasattr(widget, 'screen')):
+                continue
+            if widget.screen.current_record == current_record:
+                continue
+            record = current_record
+            if not is_compatbile(widget.screen, record):
+                record = None
+            if not widget._validate():
+                def go_previous():
+                    record = widget.screen.current_record
+                    if not is_compatbile(screen, record):
+                        record = None
+                    screen.current_record = record
+                    screen.display()
+                GLib.idle_add(go_previous)
+                return
+            to_sync.append((widget, record))
+        for widget, record in to_sync:
+            if (widget.screen.current_view.view_type == 'form'
+                    and record is not None
+                    and widget.screen.group.model_name ==
+                    record.group.model_name):
+                fields = dict((name, field.attrs) for name, field in
+                    widget.screen.group.fields.items())
+                record.group.load_fields(fields)
+                for field_name in fields.keys():
+                    record[field_name].get(record)
+            widget.screen.current_record = record
+            widget.display()
+
     def display(self):
         super(One2Many, self).display()
 
@@ -502,7 +580,10 @@ class One2Many(Widget):
             return False
         new_group = self.field.get_client(self.record)
 
-        if id(self.screen.group) != id(new_group):
+        if self.attrs.get('group') and self.attrs.get('mode') == 'form':
+            if self.screen.current_record is None:
+                self.invisible_set(True)
+        elif id(self.screen.group) != id(new_group):
             self.screen.group = new_group
             if (self.screen.current_view.view_type == 'tree') \
                     and self.screen.current_view.editable:

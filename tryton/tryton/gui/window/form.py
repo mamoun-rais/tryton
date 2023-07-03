@@ -574,7 +574,7 @@ class Form(SignalEvent, TabContent):
             'action': 'tryton-launch',
             'relate': 'tryton-link',
             'email': 'tryton-email',
-            'open': 'tryton-open',
+            'open': 'tryton-print-open',
         }
         for action_type, special_action, action_name, tooltip in (
                 ('action', 'action', _('Action'), _('Launch action')),
@@ -609,11 +609,19 @@ class Form(SignalEvent, TabContent):
             menu = tbutton._menu
             if menu.get_children():
                 menu.add(Gtk.SeparatorMenuItem())
+            # Coog: move available exports to a submenu
+            exports_menuitem = Gtk.MenuItem(set_underline('Exports'))
+            exports_menuitem.set_use_underline(True)
+            menu.add(exports_menuitem)
+
+            submenu = Gtk.Menu()
+            exports_menuitem.set_submenu(submenu)
+
             for export in exports:
                 menuitem = Gtk.MenuItem(set_underline(export['name']))
                 menuitem.set_use_underline(True)
                 menuitem.connect('activate', self.do_export, export)
-                menu.add(menuitem)
+                submenu.add(menuitem)
 
         gtktoolbar.insert(Gtk.SeparatorToolItem(), -1)
 
@@ -635,6 +643,27 @@ class Form(SignalEvent, TabContent):
         url_button.connect('toggled', self.action_popup)
         self.buttons['copy_url'] = url_button
         gtktoolbar.insert(url_button, -1)
+
+        quick_actions = toolbars.get('quick_actions', [])
+        if quick_actions:
+            gtktoolbar.insert(Gtk.SeparatorToolItem(), -1)
+        for quick_action in quick_actions:
+            icon = quick_action.get('icon.rec_name')
+            if not icon:
+                icon = 'tryton-executable'
+
+            # Fix for #8825
+            common.IconFactory.register_icon(icon)
+            qbutton = Gtk.ToolButton()
+            qbutton.set_icon_widget(
+                common.IconFactory.get_image(
+                    icon, Gtk.IconSize.LARGE_TOOLBAR))
+            qbutton.set_label(quick_action['name'])
+            qbutton.connect('clicked',
+                lambda b: self._action(quick_action, 'quick_actions'))
+            self.tooltips.set_tip(qbutton, _(quick_action['name']))
+            gtktoolbar.insert(qbutton, -1)
+
         return gtktoolbar
 
     def _create_popup_menu(self, widget, keyword, actions, special_action):

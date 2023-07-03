@@ -977,7 +977,7 @@ class DomainParser(object):
             if not clause:
                 return True
             if (((clause[0] in ('AND', 'OR'))
-                        or isinstance(clause[0], (list, tuple)))
+                    or isinstance(clause[0], (list, tuple)))
                     and all(isinstance(c, (list, tuple)) for c in clause[1:])):
                 return self.stringable(clause)
             name, _, value = clause[:3]
@@ -1122,6 +1122,8 @@ class DomainParser(object):
                 name = name[:-9]
             value = target
         if name == 'rec_name':
+            if type(value) is list:
+                return
             if operator == 'ilike':
                 escaped = value.replace('%%', '__')
                 if escaped.startswith('%') and escaped.endswith('%'):
@@ -1602,6 +1604,7 @@ def test_completion():
     assert list(dom.completion('Name: !=foo')) == []
     assert list(dom.completion('')) == ['Name: ']
     assert list(dom.completion(' ')) == ['', 'Name: ']
+    assert list(dom.complete(['rec_name', 'in', ['Foo']])) == []
 
 
 if __name__ == '__main__':
