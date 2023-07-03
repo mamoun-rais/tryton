@@ -11,30 +11,30 @@ from itertools import zip_longest
 
 from gi.repository import Gdk, GLib, Gtk
 
-from tryton.gui.window.view_form.screen import Screen
+import tryton.common as common
+from tryton import plugins
 from tryton.action import Action
+from tryton.common import (
+    RPCException, RPCExecute, message, sur, sur_3b, timezoned_date)
+from tryton.common.common import selection as selection_
+from tryton.common.popup_menu import popup
+from tryton.common.underline import set_underline
 from tryton.gui import Main
 from tryton.gui.window import Window
-from tryton.gui.window.email_ import Email
-from tryton.gui.window.win_export import WinExport
-from tryton.gui.window.win_import import WinImport
 from tryton.gui.window.attachment import Attachment
+from tryton.gui.window.email_ import Email
 from tryton.gui.window.note import Note
 from tryton.gui.window.revision import Revision
-from tryton.signal_event import SignalEvent
-from tryton.common import message, sur, sur_3b, timezoned_date
-import tryton.common as common
-from tryton.common import RPCExecute, RPCException
-from tryton.common.common import selection as selection_
-from tryton.common.underline import set_underline
-from tryton import plugins
+from tryton.gui.window.view_form.screen import Screen
+from tryton.gui.window.win_export import WinExport
+from tryton.gui.window.win_import import WinImport
 
 from .tabcontent import TabContent
 
 _ = gettext.gettext
 
 
-class Form(SignalEvent, TabContent):
+class Form(TabContent):
     "Form"
 
     def __init__(self, model, res_id=None, name='', **attributes):
@@ -50,26 +50,20 @@ class Form(SignalEvent, TabContent):
             name = common.MODELNAME.get(model)
         self.name = name
 
+        loading_ids = res_id not in (None, False)
+        if loading_ids:
+            attributes.pop('tab_domain', None)
         self.screen = Screen(self.model, breadcrumb=[self.name], **attributes)
         self.screen.widget.show()
+        self.screen.windows.append(self)
 
         self.create_tabcontent()
 
         self.set_buttons_sensitive()
 
-        self.screen.signal_connect(self, 'record-message',
-            self._record_message)
-
-        self.screen.signal_connect(self, 'record-modified',
-            lambda *a: GLib.idle_add(self._record_modified, *a))
-        self.screen.signal_connect(self, 'record-saved', self._record_saved)
-        self.screen.signal_connect(
-            self, 'resources',
-            lambda screen, resources: self.update_resources(resources))
-
         self.attachment_screen = None
 
-        if res_id not in (None, False):
+        if loading_ids:
             if isinstance(res_id, int):
                 res_id = [res_id]
             self.screen.load(res_id)
@@ -119,16 +113,12 @@ class Form(SignalEvent, TabContent):
                     attributes.get('mode') or ['tree', 'form']))
             and self.screen.local_context == attributes.get('context')
             and self.attributes.get('search_value') == (
-                attributes.get('search_value'))
-            and self.attributes.get('tab_domain') == (
-                attributes.get('tab_domain')))
+                attributes.get('search_value')))
 
     def __hash__(self):
         return id(self)
 
     def destroy(self):
-        super(Form, self).destroy()
-        self.screen.signal_unconnect(self)
         self.screen.destroy()
 
     def sig_attach(self, widget=None):
@@ -223,13 +213,13 @@ class Form(SignalEvent, TabContent):
         but_prev.connect('clicked', lambda *a: screen.display_prev())
         but_next.connect('clicked', lambda *a: screen.display_next())
 
-        def update_label(screen, data):
-            position, length = data[:2]
-            label.set_text('(%s/%s)' % (position or '_', length))
-            but_prev.set_sensitive(position and position > 1)
-            but_next.set_sensitive(position and position < length)
+        class Preview():
+            def record_message(self, position, length, *args):
+                label.set_text('(%s/%s)' % (position or '_', length))
+                but_prev.set_sensitive(position and position > 1)
+                but_next.set_sensitive(position and position < length)
+        screen.windows.append(Preview())
 
-        screen.signal_connect(self, 'record-message', update_label)
         vbox.pack_start(screen.widget, expand=True, fill=True, padding=0)
         return vbox
 
@@ -301,7 +291,7 @@ class Form(SignalEvent, TabContent):
     def sig_logs(self, widget=None):
         current_record = self.screen.current_record
         if not current_record or current_record.id < 0:
-            self.message_info(
+            self.info_bar_add(
                 _('You have to select one record.'), Gtk.MessageType.INFO)
             return False
 
@@ -415,10 +405,10 @@ class Form(SignalEvent, TabContent):
             msg = _('Are you sure to remove those records?')
         if sur(msg):
             if not self.screen.remove(delete=True, force_remove=True):
-                self.message_info(
+                self.info_bar_add(
                     _('Records not removed.'), Gtk.MessageType.ERROR)
             else:
-                self.message_info(_('Records removed.'), Gtk.MessageType.INFO)
+                self.info_bar_add(_('Records removed.'), Gtk.MessageType.INFO)
                 self.screen.count_tab_domain(True)
 
     def sig_import(self, widget=None):
@@ -475,7 +465,7 @@ class Form(SignalEvent, TabContent):
             if not self.modified_save():
                 return
         self.screen.new()
-        self.message_info()
+        self.info_bar_clear()
         self.activate_save()
 
     def sig_copy(self, widget=None):
@@ -484,7 +474,8 @@ class Form(SignalEvent, TabContent):
         if not self.modified_save():
             return
         if self.screen.copy():
-            self.message_info(_('Working now on the duplicated record(s).'),
+            self.info_bar_add(
+                _('Working now on the duplicated record(s).'),
                 Gtk.MessageType.INFO)
             self.screen.count_tab_domain(True)
 
@@ -497,11 +488,11 @@ class Form(SignalEvent, TabContent):
                 or self.screen.writable):
             return
         if self.screen.save_current():
-            self.message_info(_('Record saved.'), Gtk.MessageType.INFO)
+            self.info_bar_add(_('Record saved.'), Gtk.MessageType.INFO)
             self.screen.count_tab_domain(True)
             return True
         else:
-            self.message_info(
+            self.info_bar_add(
                 self.screen.invalid_message(), Gtk.MessageType.ERROR)
             return False
 
@@ -509,14 +500,14 @@ class Form(SignalEvent, TabContent):
         if not self.modified_save():
             return
         self.screen.display_prev()
-        self.message_info()
+        self.info_bar_clear()
         self.activate_save()
 
     def sig_next(self, widget=None):
         if not self.modified_save():
             return
         self.screen.display_next()
-        self.message_info()
+        self.info_bar_clear()
         self.activate_save()
 
     def sig_reload(self, test_modified=True):
@@ -537,7 +528,7 @@ class Form(SignalEvent, TabContent):
                     set_cursor = True
                     break
         self.screen.display(set_cursor=set_cursor)
-        self.message_info()
+        self.info_bar_clear()
         self.set_buttons_sensitive()
         self.activate_save()
         self.screen.count_tab_domain()
@@ -596,28 +587,20 @@ class Form(SignalEvent, TabContent):
         if not widget.props.active:
             menu.popdown()
             return
+        popup(menu, widget)
 
-        def menu_position(menu, x, y, user_data):
-            widget_allocation = widget.get_allocation()
-            x, y = widget.get_window().get_root_coords(
-                widget_allocation.x, widget_allocation.y)
-            return (x, y + widget_allocation.height, False)
-        menu.show_all()
-        if hasattr(menu, 'popup_at_widget'):
-            menu.popup_at_widget(
-                widget, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST,
-                Gtk.get_current_event())
-        else:
-            menu.popup(
-                None, None, menu_position, None, 0,
-                Gtk.get_current_event_time())
+    def record_message(self, position, size, max_size, record_id):
+        def set_sensitive(button_id, sensitive):
+            if button_id in self.buttons:
+                self.buttons[button_id].props.sensitive = sensitive
+            if button_id in self.menu_buttons:
+                self.menu_buttons[button_id].props.sensitive = sensitive
 
-    def _record_message(self, screen, signal_data):
-        name = '_'
-        if signal_data[0]:
-            name = str(signal_data[0])
-        for button_id in ('print', 'relate', 'email', 'open', 'save',
-                'attach'):
+        name = str(position) if position else '_'
+        selected = len(self.screen.selected_records)
+        if selected > 1:
+            name += '#%i' % selected
+        for button_id in ('relate', 'email', 'open', 'save', 'attach'):
             button = self.buttons[button_id]
             can_be_sensitive = getattr(button, '_can_be_sensitive', True)
             if button_id in {'print', 'relate', 'email', 'open'}:
@@ -626,36 +609,42 @@ class Form(SignalEvent, TabContent):
                     action_type = 'print'
                 can_be_sensitive |= any(
                     b.attrs.get('keyword', 'action') == action_type
-                    for b in screen.get_buttons())
+                    for b in self.screen.get_buttons())
             elif button_id == 'save':
                 can_be_sensitive &= not self.screen.readonly
-            button.props.sensitive = (bool(signal_data[0])
-                and can_be_sensitive)
-        button_switch = self.buttons['switch']
-        button_switch.props.sensitive = self.screen.number_of_views > 1
+            set_sensitive(button_id, bool(position) and can_be_sensitive)
+        set_sensitive('switch', self.screen.number_of_views > 1)
+        set_sensitive('remove', self.screen.deletable)
+        set_sensitive('previous', self.screen.has_prev())
+        set_sensitive('next', self.screen.has_next())
 
-        menu_delete = self.menu_buttons['remove']
-        menu_delete.props.sensitive = self.screen.deletable
-        menu_save = self.menu_buttons['save']
-        menu_save.props.sensitive = not self.screen.readonly
-
-        msg = name + ' / ' + str(signal_data[1])
-        if (signal_data[1] < signal_data[2]
-                and self.screen.limit is not None
-                and signal_data[2] > self.screen.limit):
-            msg += _(' of ') + str(signal_data[2])
+        if self.forced_count:
+            size_display_func = lambda x: str(x)
+        else:
+            size_display_func = common.humanize
+        msg = name + ' / ' + size_display_func(size)
+        if size < max_size:
+            extra = ''
+            if not self.forced_count and self.screen.count_limit <= max_size:
+                extra = '+'
+            msg += _(' of ') + size_display_func(max_size) + extra
         self.status_label.set_text(msg)
-        self.message_info()
+        self.info_bar_clear()
         self.activate_save()
         self.refresh_attachment_preview()
+        # reset forced_count to transmit the info that we're not doing accurate
+        # length computation anymore
+        self.forced_count = False
 
-    def _record_modified(self, screen, signal_data):
-        # As it is called via idle_add, the form could have been destroyed in
-        # the meantime.
-        if self.widget_get().props.window:
-            self.activate_save()
+    def record_modified(self):
+        def _record_modified():
+            # As it is called via idle_add, the form could have been destroyed
+            # in the meantime.
+            if self.widget_get().props.window:
+                self.activate_save()
+        GLib.idle_add(_record_modified)
 
-    def _record_saved(self, screen, signal_data):
+    def record_saved(self):
         self.activate_save()
         self.refresh_resources()
 
@@ -731,14 +720,14 @@ class Form(SignalEvent, TabContent):
             'print': 'tryton-print',
             'action': 'tryton-launch',
             'relate': 'tryton-link',
-            'open': 'tryton-open',
+            'email': 'tryton-email',
+            'open': 'tryton-print',
         }
         for action_type, special_action, action_name, tooltip in (
                 ('action', 'action', _('Action'), _('Launch action')),
                 ('relate', 'relate', _('Relate'), _('Open related records')),
                 (None,) * 4,
                 ('print', 'open', _('Report'), _('Open report')),
-                ('print', 'print', _('Print'), _('Print report')),
                 ):
             if action_type is not None:
                 tbutton = Gtk.ToggleToolButton()
@@ -766,11 +755,19 @@ class Form(SignalEvent, TabContent):
             menu = tbutton._menu
             if menu.get_children():
                 menu.add(Gtk.SeparatorMenuItem())
+            # Coog: move available exports to a submenu
+            exports_menuitem = Gtk.MenuItem(set_underline('Exports'))
+            exports_menuitem.set_use_underline(True)
+            menu.add(exports_menuitem)
+
+            submenu = Gtk.Menu()
+            exports_menuitem.set_submenu(submenu)
+
             for export in exports:
                 menuitem = Gtk.MenuItem(set_underline(export['name']))
                 menuitem.set_use_underline(True)
                 menuitem.connect('activate', self.do_export, export)
-                menu.add(menuitem)
+                submenu.add(menuitem)
 
         last_item = gtktoolbar.get_nth_item(gtktoolbar.get_n_items() - 1)
         if not isinstance(last_item, Gtk.SeparatorToolItem):
@@ -794,6 +791,34 @@ class Form(SignalEvent, TabContent):
         url_button.connect('toggled', self.action_popup)
         self.buttons['copy_url'] = url_button
         gtktoolbar.insert(url_button, -1)
+
+        quick_actions = toolbars.get('quick_actions', [])
+        if quick_actions:
+            gtktoolbar.insert(Gtk.SeparatorToolItem(), -1)
+        for quick_action in quick_actions:
+            icon = quick_action.get('icon.', {}).get('rec_name')
+            if not icon:
+                icon = 'tryton-executable'
+
+            # prevent problem with variables scopes in lambda
+            # cf. https://docs.python.org/3/faq/programming.html#
+            # why-do-lambdas-defined-in-a-loop-with-different-values
+            # -all-return-the-same-result
+            def make_func(n, *args):
+                return lambda z: n(*args)
+
+            # Fix for #8825
+            common.IconFactory.register_icon(icon)
+            qbutton = Gtk.ToolButton()
+            qbutton.set_icon_widget(
+                common.IconFactory.get_image(
+                    icon, Gtk.IconSize.LARGE_TOOLBAR))
+            qbutton.set_label(quick_action['name'])
+            qbutton.connect('clicked',
+                make_func(self._action, quick_action, 'quick_actions'))
+            self.tooltips.set_tip(qbutton, _(quick_action['name']))
+            gtktoolbar.insert(qbutton, -1)
+
         return gtktoolbar
 
     def _create_popup_menu(self, widget, keyword, actions, special_action):
@@ -914,3 +939,8 @@ class Form(SignalEvent, TabContent):
                     win_attach.add_uri(uri)
             else:
                 win_attach.add_uri(selection.get_text())
+
+    def _force_count(self, eventbox, event):
+        super()._force_count(eventbox, event)
+        domain = self.screen.screen_container.get_text()
+        self.screen._force_count(domain)

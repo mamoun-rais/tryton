@@ -3,18 +3,20 @@
 import gettext
 import itertools
 
-from gi.repository import Gdk, Gtk
+from gi.repository import Gdk, Gtk, GLib
 
-from .widget import Widget
-from tryton.gui.window.view_form.screen import Screen
-from tryton.gui.window.win_search import WinSearch
-from tryton.gui.window.win_form import WinForm
 import tryton.common as common
 from tryton.common.completion import get_completion, update_completion
 from tryton.common.domain_parser import quote
 from tryton.common.underline import set_underline
+from tryton.gui.window.view_form.screen import Screen
+from tryton.gui.window.win_form import WinForm
+from tryton.gui.window.win_search import WinSearch
+
+from .widget import Widget
 
 _ = gettext.gettext
+IncompatibleGroup = object()
 
 
 class One2Many(Widget):
@@ -32,6 +34,7 @@ class One2Many(Widget):
         self._required = False
         self._position = 0
         self._length = 0
+        self._incompatible_group = False
 
         self.title_box = hbox = Gtk.HBox(homogeneous=False, spacing=0)
         hbox.set_border_width(2)
@@ -81,14 +84,14 @@ class One2Many(Widget):
             self.wid_text = Gtk.Entry()
             self.wid_text.set_placeholder_text(_('Search'))
             self.wid_text.set_property('width_chars', 13)
-            self.wid_text.connect('focus-out-event', self._focus_out)
+            self.pid_focus = self.wid_text.connect('focus-out-event',
+                self._focus_out)
             hbox.pack_start(self.wid_text, expand=True, fill=True, padding=0)
 
             if int(self.attrs.get('completion', 1)):
-                access = common.MODELACCESS[attrs['relation']]
                 self.wid_completion = get_completion(
-                    search=access['read'] and access['write'],
-                    create=attrs.get('create', True) and access['create'])
+                    search=self.read_access,
+                    create=self.create_access)
                 self.wid_completion.connect('match-selected',
                     self._completion_match_selected)
                 self.wid_completion.connect('action-activated',
@@ -153,8 +156,12 @@ class One2Many(Widget):
 
         frame = Gtk.Frame()
         frame.add(hbox)
-        frame.set_shadow_type(Gtk.ShadowType.OUT)
-        vbox.pack_start(frame, expand=False, fill=True, padding=0)
+        # XXX: support expand_toolbar
+        if attrs.get('expand_toolbar'):
+            frame.set_shadow_type(Gtk.ShadowType.NONE)
+        else:
+            frame.set_shadow_type(Gtk.ShadowType.OUT)
+            vbox.pack_start(frame, expand=False, fill=True, padding=0)
 
         model = attrs['relation']
         breadcrumb = list(self.view.screen.breadcrumb)
@@ -168,10 +175,20 @@ class One2Many(Widget):
             row_activate=self._on_activate,
             exclude_field=attrs.get('relation_field', None),
             limit=None,
-            context=self.view.screen.context,
             breadcrumb=breadcrumb)
         self.screen.pre_validate = bool(int(attrs.get('pre_validate', 0)))
-        self.screen.signal_connect(self, 'record-message', self._sig_label)
+        self.screen.windows.append(self)
+        if self.attrs.get('group'):
+            self.screen._multiview_form = view
+            self.screen._multiview_group = self.attrs['group']
+            wgroup = view.widget_groups.setdefault(self.attrs['group'], [])
+            if self.screen.current_view.view_type == 'tree':
+                if (wgroup
+                        and wgroup[0].screen.current_view.view_type == 'tree'):
+                    raise ValueError("Wrong multiview definition")
+                wgroup.insert(0, self)
+            else:
+                wgroup.append(self)
 
         vbox.pack_start(self.screen.widget, expand=True, fill=True, padding=0)
 
@@ -183,6 +200,29 @@ class One2Many(Widget):
             self.wid_text.connect('key_press_event', self.on_keypress)
 
         but_switch.props.sensitive = self.screen.number_of_views > 1
+
+    def get_access(self, type_):
+        model = self.attrs['relation']
+        if model:
+            return common.MODELACCESS[model][type_]
+        else:
+            return True
+
+    @property
+    def read_access(self):
+        return self.get_access('read')
+
+    @property
+    def create_access(self):
+        return int(self.attrs.get('create', 1)) and self.get_access('create')
+
+    @property
+    def write_access(self):
+        return self.get_access('write')
+
+    @property
+    def delete_access(self):
+        return int(self.attrs.get('delete', 1)) and self.get_access('delete')
 
     def on_keypress(self, widget, event):
         if ((event.keyval == Gdk.KEY_F3)
@@ -227,7 +267,7 @@ class One2Many(Widget):
 
     def destroy(self):
         if self.attrs.get('add_remove'):
-            self.wid_text.disconnect_by_func(self._focus_out)
+            self.wid_text.disconnect(self.pid_focus)
         self.screen.destroy()
 
     def _on_activate(self):
@@ -235,6 +275,7 @@ class One2Many(Widget):
 
     def switch_view(self, widget):
         self.screen.switch_view()
+
         mnemonic_widget = self.screen.current_view.mnemonic_widget
         string = self.attrs.get('string', '')
         if mnemonic_widget:
@@ -244,7 +285,9 @@ class One2Many(Widget):
 
     @property
     def modified(self):
-        return self.screen.current_view.modified
+        # JCA : Check current_view is not None
+        return (self.screen.current_view.modified if self.screen.current_view
+            else False)
 
     def _readonly_set(self, value):
         self._readonly = value
@@ -260,7 +303,6 @@ class One2Many(Widget):
             self.title, self._readonly, self._required)
 
     def _set_button_sensitive(self):
-        access = common.MODELACCESS[self.screen.model_name]
         if self.record and self.field:
             field_size = self.record.expr_eval(self.attrs.get('size'))
             o2m_size = len(self.field.get_eval(self.record))
@@ -270,6 +312,9 @@ class One2Many(Widget):
             o2m_size = None
             size_limit = False
 
+        has_form = ('form' in (x.view_type for x in self.screen.views)
+            or 'form' in self.screen.view_to_load)
+
         first = last = False
         if isinstance(self._position, int):
             first = self._position <= 1
@@ -278,22 +323,22 @@ class One2Many(Widget):
 
         self.but_new.set_sensitive(bool(
                 not self._readonly
-                and self.attrs.get('create', True)
+                and self.create_access
                 and not size_limit
-                and access['create']))
+                and (has_form or self.screen.current_view.editable)))
         self.but_del.set_sensitive(bool(
                 not self._readonly
-                and self.attrs.get('delete', True)
+                and self.delete_access
                 and deletable
-                and self._position
-                and access['delete']))
+                and self._position))
         self.but_undel.set_sensitive(bool(
                 not self._readonly
                 and not size_limit
                 and self._position))
         self.but_open.set_sensitive(bool(
                 self._position
-                and access['read']))
+                and self.read_access
+                and has_form))
         self.but_next.set_sensitive(bool(
                 self._position
                 and not last))
@@ -304,13 +349,13 @@ class One2Many(Widget):
             self.but_add.set_sensitive(bool(
                     not self._readonly
                     and not size_limit
-                    and access['write']
-                    and access['read']))
+                    and self.write_access
+                    and self.read_access))
             self.but_remove.set_sensitive(bool(
                     not self._readonly
                     and self._position
-                    and access['write']
-                    and access['read']))
+                    and self.write_access
+                    and self.read_access))
             self.wid_text.set_sensitive(self.but_add.get_sensitive())
             self.wid_text.set_editable(self.but_add.get_sensitive())
 
@@ -318,7 +363,8 @@ class One2Many(Widget):
         self.view.set_value()
         record = self.screen.current_record
         if record:
-            fields = self.screen.current_view.get_fields()
+            fields = self.screen.current_view.get_fields() \
+                if self.screen.current_view else None
             if not record.validate(fields):
                 self.screen.display(set_cursor=True)
                 return False
@@ -334,7 +380,7 @@ class One2Many(Widget):
                     return sequence
 
     def _sig_new(self, *args):
-        if not common.MODELACCESS[self.screen.model_name]['create']:
+        if not self.create_access:
             return
         if not self._validate():
             return
@@ -352,7 +398,7 @@ class One2Many(Widget):
                 self.screen.group.set_sequence(
                     field=sequence, position=self.screen.new_position)
 
-        if self.screen.current_view.editable:
+        if self.screen.current_view.creatable:
             self.screen.new()
             self.screen.current_view.widget.set_sensitive(True)
             update_sequence()
@@ -416,7 +462,7 @@ class One2Many(Widget):
         search_set()
 
     def _sig_edit(self, widget=None):
-        if not common.MODELACCESS[self.screen.model_name]['read']:
+        if not self.but_open.props.sensitive:
             return
         if not self._validate():
             return
@@ -435,14 +481,13 @@ class One2Many(Widget):
         self.screen.display_prev()
 
     def _sig_remove(self, widget, remove=False):
-        access = common.MODELACCESS[self.screen.model_name]
         writable = not self.screen.readonly
         deletable = self.screen.deletable
         if remove:
-            if not access['write'] or not writable or not access['read']:
+            if not self.write_access or not writable or not self.read_access:
                 return
         else:
-            if not access['delete'] or not deletable:
+            if not self.delete_access or not deletable:
                 return
         self.screen.remove(remove=remove)
 
@@ -452,10 +497,8 @@ class One2Many(Widget):
     def _sig_add(self, *args):
         if not self.focus_out:
             return
-        access = common.MODELACCESS[self.screen.model_name]
-        if not access['write'] or not access['read']:
+        if not self.write_access or not self.read_access:
             return
-        self.view.set_value()
         domain = self.field.domain_get(self.record)
         context = self.field.get_search_context(self.record)
         domain = [domain, self.record.expr_eval(self.attrs.get('add_remove'))]
@@ -490,9 +533,9 @@ class One2Many(Widget):
         win.screen.search_filter(quote(text))
         win.show()
 
-    def _sig_label(self, screen, signal_data):
-        self._position = signal_data[0]
-        self._length = signal_data[1]
+    def record_message(self, position, size, *args):
+        self._position = position
+        self._length = size
         if self._position:
             name = str(self._position)
         else:
@@ -514,7 +557,10 @@ class One2Many(Widget):
             return False
         new_group = self.field.get_client(self.record)
 
-        if id(self.screen.group) != id(new_group):
+        if self.attrs.get('group') and self.attrs.get('mode') == 'form':
+            self.invisible_set(not self.visible or self._incompatible_group)
+        if (id(self.screen.group) != id(new_group)
+                and self.screen.model_name == new_group.model_name):
             self.screen.group = new_group
             if (self.screen.current_view.view_type == 'tree') \
                     and self.screen.current_view.editable:
@@ -529,7 +575,7 @@ class One2Many(Widget):
                 size_limit = len(self.screen.group)
             else:
                 size_limit = min(size_limit, len(self.screen.group))
-        if self.screen.domain != domain:
+        if self.screen.get_domain() != domain:
             self.screen.domain = domain
         self.screen.size_limit = size_limit
         self.screen.display()
@@ -538,8 +584,7 @@ class One2Many(Widget):
     def set_value(self):
         self.screen.current_view.set_value()
         if self.screen.modified():  # TODO check if required
-            self.record.modified_fields.setdefault(self.field.name)
-            self.record.signal('record-modified')
+            self.view.screen.record_modified(display=False)
         return True
 
     def _completion_match_selected(self, completion, model, iter_):

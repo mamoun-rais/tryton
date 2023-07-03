@@ -1,20 +1,20 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import logging
 import gettext
+import logging
 
 from gi.repository import Gdk, Gtk, Pango
 
-from tryton.signal_event import SignalEvent
 import tryton.common as common
-from tryton.gui.window.view_form.screen import Screen
-from tryton.gui import Main
-from tryton.exceptions import TrytonServerError
-from tryton.gui.window.nomodal import NoModal
+from tryton.common import (
+    TRYTON_ICON, RPCContextReload, RPCException, RPCExecute)
 from tryton.common.button import Button
-from tryton.common import RPCExecute, RPCException, RPCContextReload
-from tryton.common import TRYTON_ICON
 from tryton.common.widget_style import widget_class
+from tryton.exceptions import TrytonServerError
+from tryton.gui import Main
+from tryton.gui.window.nomodal import NoModal
+from tryton.gui.window.view_form.screen import Screen
+
 from .infobar import InfoBar
 from .tabcontent import TabContent
 
@@ -63,6 +63,8 @@ class Wizard(InfoBar):
         self.context['active_ids'] = self.ids
         self.context['active_model'] = self.model
         self.context['action_id'] = self.action_id
+        self.context['direct_print'] = self.direct_print
+        self.context['email_print'] = self.email_print
 
         def callback(result):
             try:
@@ -108,7 +110,7 @@ class Wizard(InfoBar):
 
                 self.screen.new(default=False)
                 self.screen.current_record.set_default(view['defaults'])
-                self.update_buttons(self.screen.current_record)
+                self.update_buttons()
                 self.screen.set_cursor()
 
                 self.screen_state = view['state']
@@ -155,8 +157,8 @@ class Wizard(InfoBar):
                 process_exception=False, callback=end_callback)
         except Exception:
             logger.warn(
-                _("Unable to delete wizard %s") % self.session_id,
-                exc_info=True)
+                "Unable to delete session %s of wizard %s",
+                self.session_id, self.action, exc_info=True)
 
     def clean(self):
         for widget in self.widget.get_children():
@@ -171,10 +173,10 @@ class Wizard(InfoBar):
         if (button_attrs.get('validate', True)
                 and not self.screen.current_record.validate()):
             self.screen.display(set_cursor=True)
-            self.message_info(
+            self.info_bar_add(
                 self.screen.invalid_message(), Gtk.MessageType.ERROR)
             return
-        self.message_info()
+        self.info_bar_clear()
         self.state = state
         self.process()
 
@@ -186,10 +188,11 @@ class Wizard(InfoBar):
         button.show()
         return button
 
-    def _record_changed(self, screen, record):
-        self.update_buttons(record)
+    def record_modified(self):
+        self.update_buttons()
 
-    def update_buttons(self, record):
+    def update_buttons(self):
+        record = self.screen.current_record
         for button in self.states.values():
             button.state_set(record)
 
@@ -198,12 +201,14 @@ class Wizard(InfoBar):
         for button in buttons:
             self._get_button(button)
 
+        if self.screen:
+            self.screen.windows.remove(self)
+
         self.screen = Screen(view['model'], mode=[], context=self.context)
         self.screen.add_view(view)
         self.screen.switch_view()
         self.screen.widget.show()
-        self.screen.signal_connect(self, 'group-changed',
-            self._record_changed)
+        self.screen.windows.append(self)
 
         title = Gtk.Label(
             label=common.ellipsize(self.name, 80),
@@ -239,12 +244,11 @@ class Wizard(InfoBar):
         self.widget.pack_start(
             self.scrolledwindow, expand=True, fill=True, padding=0)
 
-        self.create_info_bar()
         self.widget.pack_start(
-            self.info_bar, expand=False, fill=True, padding=0)
+            self.create_info_bar(), expand=False, fill=True, padding=0)
 
 
-class WizardForm(Wizard, TabContent, SignalEvent):
+class WizardForm(Wizard, TabContent):
     "Wizard"
 
     def __init__(self, name=''):
@@ -294,7 +298,7 @@ class WizardForm(Wizard, TabContent, SignalEvent):
 
     def set_cursor(self):
         if self.screen:
-            self.screen.set_cursor()
+            self.screen.set_cursor(reset_view=False)
 
 
 class WizardDialog(Wizard, NoModal):
@@ -375,11 +379,14 @@ class WizardDialog(Wizard, NoModal):
         else:
             dialog = self.page
         screen = getattr(dialog, 'screen', None)
-        if self.sensible_widget == main.window:
+        # JMO: the conditions added on 'reload' are needed
+        # for https://support.coopengo.com/issues/12986
+        if action != 'reload' and self.sensible_widget == main.window:
             screen = main.menu_screen
         if screen:
             if (screen.current_record
-                    and self.sensible_widget != main.window):
+                    and self.sensible_widget != main.window or
+                    action == 'reload'):
                 if screen.model_name == self.model:
                     ids = self.ids
                 else:

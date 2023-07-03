@@ -1,12 +1,11 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import operator
 import math
+import operator
 
 from gi.repository import Gdk, GLib, GObject, Gtk
 
-from tryton.common import RPCExecute, RPCException
-from tryton.common import eval_domain
+from tryton.common import RPCException, RPCExecute, eval_domain
 
 
 class SelectionMixin(object):
@@ -32,9 +31,11 @@ class SelectionMixin(object):
             try:
                 if self.attrs.get('selection_change_with'):
                     selection = RPCExecute('model', self.model_name, selection,
-                        value)
+                        value, process_exception=False)
                 else:
-                    selection = RPCExecute('model', self.model_name, selection)
+                    selection = RPCExecute(
+                        'model', self.model_name, selection,
+                        process_exception=False)
             except RPCException:
                 selection = []
             self._values2selection[key] = selection
@@ -46,7 +47,7 @@ class SelectionMixin(object):
         self.help = help_
         self.inactive_selection = []
 
-    def update_selection(self, record, field):
+    def update_selection(self, record, field, process_exception=True):
         if not field:
             return
 
@@ -72,7 +73,7 @@ class SelectionMixin(object):
             try:
                 result = RPCExecute('model', self.attrs['relation'],
                     'search_read', domain, 0, None, None, fields,
-                    context=context)
+                    context=context, process_exception=process_exception)
             except RPCException:
                 result = False
             if isinstance(result, list):

@@ -1,12 +1,12 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import configparser
+import gettext
+import locale
+import logging
 import optparse
 import os
-import gettext
-import logging
 import sys
-import locale
 
 from gi.repository import GdkPixbuf
 
@@ -22,8 +22,9 @@ def get_config_dir():
             appdata = str(appdata, sys.getfilesystemencoding())
         return os.path.join(appdata, '.config', 'tryton',
                 __version__.rsplit('.', 1)[0])
-    return os.path.join(os.environ['HOME'], '.config', 'tryton',
-            __version__.rsplit('.', 1)[0])
+    config_path = os.getenv('XDG_CONFIG_HOME', os.path.join('~', '.config'))
+    return os.path.expanduser(
+        os.path.join(config_path, 'tryton', __version__.rsplit('.', 1)[0]))
 
 
 if not os.path.isdir(get_config_dir()):
@@ -34,35 +35,41 @@ class ConfigManager(object):
     "Config manager"
 
     def __init__(self):
-        short_version = '.'.join(__version__.split('.', 2)[:2])
-        demo_server = 'demo%s.tryton.org' % short_version
-        demo_database = 'demo%s' % short_version
+        demo_server = 'coog'
+        demo_database = 'demo'
         self.defaults = {
             'login.profile': demo_server,
             'login.login': 'demo',
             'login.host': demo_server,
             'login.db': demo_database,
             'login.expanded': False,
-            'client.title': 'Tryton',
+            'login.date': False,
+            'tip.autostart': False,
+            'tip.position': 0,
+            'form.toolbar': True,
+            'client.title': 'Coog',
+            'client.default_width': 900,
+            'client.default_height': 750,
             'client.modepda': False,
             'client.toolbar': 'default',
             'client.save_tree_width': True,
-            'client.save_tree_state': True,
+            'client.save_tree_state': False,
             'client.spellcheck': False,
             'client.lang': locale.getdefaultlocale()[0],
             'client.language_direction': 'ltr',
             'client.email': '',
-            'client.limit': 1000,
-            'client.check_version': True,
+            # JCA: Set default limit to 100 for performances
+            'client.limit': 100,
+            'client.check_version': False,
             'client.bus_timeout': 10 * 60,
-            'icon.colors': '#3465a4,#555753,#cc0000',
-            'tree.colors': '#777,#198754,#ffc107,#dc3545',
+            'icon.colors': '#0094d2,#57a639,#cc0000',
+            'tree.colors': '#777,#dff0d8,#fcf8e3,#f2dede',
             'calendar.colors': '#fff,#3465a4',
             'graph.color': '#3465a4',
             'image.max_size': 10 ** 6,
             'image.cache_size': 1024,
-            'bug.url': 'https://bugs.tryton.org/',
-            'download.url': 'https://downloads.tryton.org/',
+            'bug.url': 'https://support.coopengo.com/',
+            'download.url': 'https://downloads-cdn.tryton.org/',
             'download.frequency': 60 * 60 * 8,
             'menu.pane': 200,
         }
@@ -71,7 +78,7 @@ class ConfigManager(object):
         self.arguments = []
 
     def parse(self):
-        parser = optparse.OptionParser(version=("Tryton %s" % __version__),
+        parser = optparse.OptionParser(version=("Coog %s" % __version__),
                 usage="Usage: %prog [options] [url]")
         parser.add_option("-c", "--config", dest="config",
                 help=_("specify alternate config file"))
@@ -84,6 +91,8 @@ class ConfigManager(object):
         parser.add_option("-l", "--log-level", dest="log_level",
                 help=_("specify the log level: "
                 "DEBUG, INFO, WARNING, ERROR, CRITICAL"))
+        parser.add_option("-o", "--log-ouput", dest="log_output", default=None,
+            help=_("specify the file used to output logging information"))
         parser.add_option("-u", "--user", dest="login",
                 help=_("specify the login user"))
         parser.add_option("-s", "--server", dest="host",
@@ -93,8 +102,13 @@ class ConfigManager(object):
             get_config_dir(), 'tryton.conf')
         self.load()
 
-        self.options['dev'] = opt.dev
-        logging.basicConfig()
+        logging_config = {
+            'format': '%(asctime)s.%(msecs)03d:%(levelname)s:%(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
+            }
+        if opt.log_output:
+            logging_config['filename'] = opt.log_output
+
         loglevels = {
             'DEBUG': logging.DEBUG,
             'INFO': logging.INFO,
@@ -107,8 +121,10 @@ class ConfigManager(object):
                 opt.log_level = 'INFO'
             else:
                 opt.log_level = 'ERROR'
-        logging.getLogger().setLevel(loglevels[opt.log_level.upper()])
+        logging_config['level'] = loglevels[opt.log_level.upper()]
+        logging.basicConfig(**logging_config)
 
+        self.options['dev'] = opt.dev
         for arg in ['login', 'host']:
             if getattr(opt, arg):
                 self.options['login.' + arg] = getattr(opt, arg)
@@ -173,4 +189,4 @@ if not os.path.isdir(PIXMAPS_DIR):
         'tryton', 'data/pixmaps/tryton')
 
 TRYTON_ICON = GdkPixbuf.Pixbuf.new_from_file(
-    os.path.join(PIXMAPS_DIR, 'tryton-icon.png'))
+    os.path.join(PIXMAPS_DIR, 'coog_no_text.svg'))

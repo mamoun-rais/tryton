@@ -2,9 +2,10 @@
 # this repository contains the full copyright notices and license terms.
 from gi.repository import GLib, Gtk
 
+from tryton.common.selection import (
+    PopdownMixin, SelectionMixin, selection_shortcuts)
+
 from .widget import Widget
-from tryton.common.selection import SelectionMixin, selection_shortcuts, \
-    PopdownMixin
 
 
 class Selection(Widget, SelectionMixin, PopdownMixin):
@@ -50,6 +51,9 @@ class Selection(Widget, SelectionMixin, PopdownMixin):
         self.entry.get_child().set_editable(not value)
         self.entry.set_button_sensitivity(
             Gtk.SensitivityType.OFF if value else Gtk.SensitivityType.AUTO)
+
+    def _color_widget(self):
+        return self.entry.get_child()
 
     def get_value(self):
         if not self.entry.get_child():  # entry is destroyed

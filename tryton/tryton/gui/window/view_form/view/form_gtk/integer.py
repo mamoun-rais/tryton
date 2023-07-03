@@ -4,6 +4,7 @@ from gi.repository import Gtk
 
 from tryton.common.entry_position import reset_position
 from tryton.common.number_entry import NumberEntry
+
 from .widget import Widget
 
 
@@ -13,7 +14,8 @@ class Integer(Widget):
     def __init__(self, view, attrs):
         super(Integer, self).__init__(view, attrs)
         self.widget = Gtk.HBox()
-        self.entry = self.mnemonic_widget = NumberEntry()
+        self.entry = self.mnemonic_widget = NumberEntry(
+            monetary=attrs.get('monetary', False))
         self.entry.props.activates_default = True
         self.entry.connect('activate', self.sig_activate)
         self.entry.connect('focus-out-event', lambda *a: self._focus_out())
@@ -25,6 +27,7 @@ class Integer(Widget):
                 self.symbol_start, expand=False, fill=False, padding=1)
         self.widget.pack_start(self.entry, expand=False, fill=False, padding=0)
         self.factor = float(attrs.get('factor', 1))
+        self.grouping = bool(int(attrs.get('grouping', 1)))
         if self.symbol:
             self.symbol_end = Gtk.Entry(editable=False)
             self.widget.pack_start(
@@ -48,12 +51,13 @@ class Integer(Widget):
         if not self.field:
             value = ''
         else:
-            value = self.field.get_client(self.record, factor=self.factor)
+            value = self.field.get_client(
+                self.record, factor=self.factor, grouping=self.grouping)
         return value
 
     @property
     def width(self):
-        return 8
+        return self.attrs.get('width', 8)
 
     def display(self):
         def set_symbol(entry, text):

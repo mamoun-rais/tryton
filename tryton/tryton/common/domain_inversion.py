@@ -1,11 +1,11 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 
-import re
-import operator
 import datetime
+import operator
+import re
 from collections import defaultdict
-from functools import reduce, partial
+from functools import partial, reduce
 
 
 def sql_like(value, pattern, ignore_case=True):
@@ -284,22 +284,70 @@ def localize_domain(domain, field_name=None, strip_target=False):
             for part in domain]
 
 
-def simplify(domain):
-    "remove unused domain delimiter"
-    if is_leaf(domain):
-        return domain
-    elif domain in ('OR', 'AND'):
-        return domain
-    elif domain in (['OR'], ['AND']):
+def bool_operator(domain):
+    "Returns the boolean operator used by a domain"
+    bool_op = 'AND'
+    if domain and domain[0] in ['AND', 'OR']:
+        bool_op = domain[0]
+    return bool_op
+
+
+def simplify_nested(domain):
+    """Simplify extra domain markers"""
+    if not domain:
         return []
-    elif (isinstance(domain, list) and len(domain) == 1
-            and not is_leaf(domain[0])):
-        return simplify(domain[0])
-    elif (isinstance(domain, list) and len(domain) == 2
-            and domain[0] in ('AND', 'OR')):
-        return [simplify(domain[1])]
+    elif is_leaf(domain):
+        return [domain]
+    elif domain in ['OR', 'AND']:
+        return [domain]
+    elif isinstance(domain, list) and len(domain) == 1:
+        return simplify_nested(domain[0])
     else:
-        return [simplify(branch) for branch in domain]
+        simplified = []
+        domain_op = bool_operator(domain)
+        for branch in domain:
+            simplified_branch = simplify_nested(branch)
+            if (bool_operator(simplified_branch) == domain_op
+                    or len(simplified_branch) == 1):
+                if (simplified
+                        and simplified_branch
+                        and simplified_branch[0] in ['AND', 'OR']):
+                    simplified.extend(simplified_branch[1:])
+                else:
+                    simplified.extend(simplified_branch)
+            else:
+                simplified.append(simplified_branch)
+        return simplified
+
+
+def simplify_duplicate(domain):
+    """Remove duplicates subdomain from domain"""
+    dedup_branches = []
+    bool_op = None
+    if domain[0] in ['AND', 'OR']:
+        bool_op, *domain = domain
+    for branch in domain:
+        simplified_branch = simplify(branch)
+        if not simplified_branch:
+            if bool_op == 'OR':
+                return []
+            else:
+                continue
+        elif simplified_branch not in dedup_branches:
+            dedup_branches.append(simplified_branch)
+    if bool_op and len(dedup_branches) > 1:
+        dedup_branches.insert(0, bool_op)
+    return dedup_branches
+
+
+def simplify(domain):
+    """Remove duplicate expressions and useless OR/AND"""
+    if is_leaf(domain):
+        return [domain]
+    elif not domain:
+        return domain
+    else:
+        return simplify_nested(simplify_duplicate(domain))
 
 
 def merge(domain, domoperator=None):
@@ -342,7 +390,7 @@ def unique_value(domain):
             model = domain[3]
             value = [model, value]
         if name.count('.') == count and domain[1] == '=':
-            return True, name, value
+            return True, domain[1], value
     return False, None, None
 
 

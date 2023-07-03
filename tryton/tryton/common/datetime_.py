@@ -1,12 +1,12 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import gettext
 import datetime
+import gettext
+import re
 
-from gi.repository import Gdk, GObject, Gtk
-
-from dateutil.relativedelta import relativedelta
 from dateutil.parser import parse
+from dateutil.relativedelta import relativedelta
+from gi.repository import Gdk, GObject, Gtk
 
 from .common import IconFactory
 
@@ -38,7 +38,22 @@ def date_parse(text, format_='%x'):
     except ValueError:
         monthfirst = False
     yearfirst = not dayfirst and not monthfirst
-    return parse(text, dayfirst=dayfirst, yearfirst=yearfirst, ignoretz=True)
+    text = re.sub('/+', '/', text)
+    if len(text) == 6 and re.search('[0-9]{6}', text):
+        text = '%s/%s/%s' % (text[:2], text[2:4], text[4:6])
+    elif len(text) == 8 and re.search('[0-9]{8}', text):
+        if yearfirst:
+            text = '%s/%s/%s' % (text[:4], text[4:6], text[6:8])
+        else:
+            text = '%s/%s/%s' % (text[:2], text[2:4], text[4:8])
+    elif text.endswith('/'):
+        text = text.strip('/')
+    # Try catch below avoid client crash when the parse method fails
+    try:
+        return parse(text, dayfirst=dayfirst, yearfirst=yearfirst,
+            ignoretz=True)
+    except Exception:
+        return datetime.datetime.now()
 
 
 class Date(Gtk.Entry):
@@ -201,6 +216,7 @@ class Date(Gtk.Entry):
                 assert isinstance(value, datetime.date), value
             self.__date = value
             self.update_label()
+            self.emit('date-changed')
         elif prop.name == 'format':
             self.__format = _fix_format(value)
             self.update_label()
@@ -373,6 +389,7 @@ class Time(Gtk.ComboBox):
                     value = value.time()
             self.__time = value
             self.update_label()
+            self.emit('time-changed')
         elif prop.name == 'format':
             self.__format = _fix_format(value)
             self.update_label()

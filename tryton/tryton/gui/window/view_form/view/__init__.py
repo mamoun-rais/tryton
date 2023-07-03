@@ -16,7 +16,9 @@ class View(object):
     view_id = None
     modified = None
     editable = None
+    creatable = None
     children_field = None
+    children_definitions = None
     scroll = None
     xml_parser = None
 
@@ -60,16 +62,18 @@ class View(object):
         raise NotImplementedError
 
     @staticmethod
-    def parse(screen, view_id, view_type, xml, children_field):
-        from .list import ViewTree
+    def parse(screen, view_id, view_type, xml, children_field,
+            children_definitions=None):
+        from .calendar_ import ViewCalendar
         from .form import ViewForm
         from .graph import ViewGraph
-        from .calendar_ import ViewCalendar
+        from .list import ViewTree
         from .list_form import ViewListForm
 
         root, = xml.childNodes
         if view_type == 'tree':
-            return ViewTree(view_id, screen, root, children_field)
+            return ViewTree(view_id, screen, root, children_field,
+                children_definitions)
         elif view_type == 'form':
             return ViewForm(view_id, screen, root)
         elif view_type == 'graph':
@@ -118,7 +122,7 @@ class XMLViewParser:
                     'sort', 'context', 'size', 'filename', 'autocomplete',
                     'translate', 'create', 'delete', 'selection_change_with',
                     'schema_model', 'required', 'help_selection',
-                    'help_field', 'order']:
+                    'help_field', 'order', 'symbol', 'monetary']:
                 if name in field:
                     node_attrs.setdefault(name, field[name])
         return node_attrs

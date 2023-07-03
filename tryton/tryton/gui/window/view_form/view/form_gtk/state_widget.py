@@ -1,13 +1,16 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import functools
+import logging
 
-from gi.repository import Gtk
+from gi.repository import Gtk, Pango
 
 import tryton.common as common
 from tryton.action import Action
 from tryton.config import CONFIG
 from tryton.pyson import PYSONDecoder
+
+logger = logging.getLogger(__name__)
 
 
 class StateMixin(object):
@@ -50,6 +53,57 @@ class Label(StateMixin, Gtk.Label):
         readonly = ((field and field.attrs.get('readonly'))
                 or state_changes.get('readonly', not bool(field)))
         common.apply_label_attributes(self, readonly, required)
+        if field:
+            self._format_set(record, field)
+
+    def _set_background(self, value, attrlist):
+        if value not in common.COLOR_RGB:
+            logger.info('This color is not supported => %s', value)
+        color = common.COLOR_RGB.get(value, common.COLOR_RGB['black'])
+        if hasattr(Pango, 'AttrBackground'):
+            attrlist.change(Pango.AttrBackground(
+                    color[0], color[1], color[2], 0, -1))
+
+    def _set_foreground(self, value, attrlist):
+        if value not in common.COLOR_RGB:
+            logger.info('This color is not supported => %s', value)
+        color = common.COLOR_RGB.get(value, common.COLOR_RGB['black'])
+        if hasattr(Pango, 'AttrForeground'):
+            attrlist.change(Pango.AttrForeground(
+                    color[0], color[1], color[2], 0, -1))
+
+    def _set_font(self, value, attrlist):
+        attrlist.change(Pango.AttrFontDesc(
+                Pango.FontDescription(value), 0, -1))
+
+    def _format_set(self, record, field):
+        attrlist = Pango.AttrList()
+        functions = {
+            'color': self._set_foreground,
+            'fg': self._set_foreground,
+            'bg': self._set_background,
+            'font': self._set_font
+            }
+        attrs = record.expr_eval(field.get_state_attrs(record).
+            get('states', {}))
+        states = record.expr_eval(self.attrs.get('states', {})).copy()
+        states.update(attrs)
+
+        for attr in list(states.keys()):
+            if not states[attr]:
+                continue
+            key = attr.split('_')
+            if key[0] == 'field':
+                continue
+            if key[0] == 'label':
+                key = key[1:]
+            if isinstance(states[attr], str):
+                key.append(states[attr])
+            if key[0] in functions:
+                if len(key) != 2:
+                    raise ValueError(common.FORMAT_ERROR + attr)
+                functions[key[0]](key[1], attrlist)
+        self.set_attributes(attrlist)
 
 
 class VBox(StateMixin, Gtk.VBox):
@@ -167,9 +221,9 @@ class Link(StateMixin, Gtk.Button):
             for n, d, c in action['domains'] if c]
         if tab_domains:
             label = ('%s\n' % action['name']) + '\n'.join(
-                '%s (%%d)' % n for n, _ in tab_domains)
+                '%s (%%s)' % n for n, _ in tab_domains)
         else:
-            label = '%s (%%d)' % action['name']
+            label = '%s (%%s)' % action['name']
         if record and self.action_id in record.links_counts:
             counter = record.links_counts[self.action_id]
             self._set_label_counter(label, counter)
@@ -181,22 +235,26 @@ class Link(StateMixin, Gtk.Button):
                 for i, (_, tab_domain) in enumerate(tab_domains):
                     common.RPCExecute(
                         'model', action['res_model'], 'search_count',
-                        ['AND', domain, tab_domain], context=context,
+                        ['AND', domain, tab_domain], 0, 100, context=context,
                         callback=functools.partial(
                             self._set_count, idx=i, current=self._current,
                             counter=counter, label=label))
             else:
                 common.RPCExecute(
-                    'model', action['res_model'], 'search_count', domain,
-                    context=context, callback=functools.partial(
+                    'model', action['res_model'], 'search_count',
+                    domain, 0, 100, context=context,
+                    callback=functools.partial(
                         self._set_count, current=self._current,
                         counter=counter, label=label))
 
     def _set_count(self, value, idx=0, current=None, counter=None, label=''):
-        if current != self._current or not self.get_parent():
+        if current != self._current and not self.get_parent():
             return
         try:
-            counter[idx] = value()
+            count = value()
+            if count > 99:
+                count = '99+'
+            counter[idx] = count
         except common.RPCException:
             pass
         self._set_label_counter(label, counter)

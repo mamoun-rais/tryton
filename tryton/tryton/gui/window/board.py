@@ -4,30 +4,26 @@
 import gettext
 import xml.dom.minidom
 
-from tryton.signal_event import SignalEvent
+from tryton.common import MODELNAME, RPCExecute
 from tryton.gui import Main
 from tryton.gui.window.view_board import ViewBoard
-from tryton.common import RPCExecute, RPCException, MODELNAME
 
 from .tabcontent import TabContent
 
 _ = gettext.gettext
 
 
-class Board(SignalEvent, TabContent):
+class Board(TabContent):
     'Board'
 
     def __init__(self, model, name='', **attributes):
         super(Board, self).__init__(**attributes)
 
         context = attributes.get('context')
-        self.view_ids = attributes.get('view_ids')
+        self.view_id, = attributes.get('view_ids')
 
-        try:
-            view, = RPCExecute('model', 'ir.ui.view', 'read',
-                self.view_ids, ['arch'], context=context)
-        except RPCException:
-            raise
+        view = RPCExecute(
+            'model', 'ir.ui.view', 'view_get', self.view_id, context=context)
 
         xml_dom = xml.dom.minidom.parseString(view['arch'])
         root, = xml_dom.childNodes

@@ -1,14 +1,14 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import logging
 import gettext
+import logging
 
 from gi.repository import GLib, Gtk
 
-from tryton.config import CONFIG
 from tryton.common import RPCExecute
 from tryton.common.domain_parser import likify
-from tryton.exceptions import TrytonServerError, TrytonError
+from tryton.config import CONFIG
+from tryton.exceptions import TrytonError, TrytonServerError
 
 _ = gettext.gettext
 logger = logging.getLogger(__name__)
@@ -67,7 +67,7 @@ def update_completion(entry, record, field, model, domain=None):
                 process_exception=False, callback=callback)
         except Exception:
             logger.warning(
-                _("Unable to search for completion of %s") % model,
+                "Unable to search for completion of %s", model,
                 exc_info=True)
         return False
     search_text = entry.get_text()

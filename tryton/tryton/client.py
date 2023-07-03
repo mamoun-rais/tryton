@@ -6,11 +6,9 @@ import sys
 import traceback
 from urllib.parse import urlparse
 
-from gi.repository import Gdk, Gtk, Gio
+from gi.repository import Gdk, Gio, Gtk
 
-from tryton import common
-from tryton import gui
-from tryton import translate
+from tryton import common, gui, translate
 from tryton.config import CONFIG, get_config_dir
 from tryton.gui.window.dblogin import DBLogin
 
@@ -45,7 +43,9 @@ def main():
     screen = Gdk.Screen.get_default()
     style_context = Gtk.StyleContext()
     provider = Gtk.CssProvider()
-    provider.load_from_data(CSS)
+    # the line below injects CSS with higher priority than the custom theme
+    # -> it overrides Coog theme behavior
+    # provider.load_from_data(CSS)
     style_context.add_provider_for_screen(
         screen, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     theme_path = os.path.join(get_config_dir(), 'theme.css')
@@ -80,7 +80,7 @@ def main():
             'database': CONFIG['login.db'],
             }
         server = hashlib.md5(server.encode('utf-8')).hexdigest()
-        application_id = 'org.tryton._' + server
+        application_id = 'org.tryton.Tryton._' + server
         app = gui.Main(
             application_id=application_id,
             flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)

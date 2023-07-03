@@ -3,6 +3,7 @@
 from gi.repository import Gtk
 
 from tryton.common.entry_position import reset_position
+
 from .widget import Widget
 
 
@@ -20,6 +21,9 @@ class TimeDelta(Widget):
         self.entry.connect('focus-out-event', lambda x, y: self._focus_out())
         self.entry.connect('key-press-event', self.send_modified)
         self.widget.pack_start(self.entry, expand=True, fill=True, padding=0)
+
+    def _color_widget(self):
+        return self.entry
 
     @property
     def modified(self):

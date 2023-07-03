@@ -1,9 +1,9 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import gettext
 import locale
 import os
 import sys
-import gettext
 
 from gi.repository import Gdk, GObject, Gtk
 
@@ -161,8 +161,7 @@ class WinCSV(NoModal):
         self.csv_enc = Gtk.ComboBoxText()
         for i, encoding in enumerate(encodings):
             self.csv_enc.append_text(encoding)
-            if ((os.name == 'nt' and encoding == 'cp1252')
-                    or (os.name != 'nt' and encoding == 'utf_8')):
+            if encoding == 'utf_8_sig':
                 self.csv_enc.set_active(i)
         label_csv_enc.set_mnemonic_widget(self.csv_enc)
         box.pack_start(self.csv_enc, expand=False, fill=True, padding=0)
@@ -279,7 +278,10 @@ class WinCSV(NoModal):
     def drag_data_received(self, treeview, context, x, y, selection,
             info, etime):
         treeview.stop_emission_by_name('drag-data-received')
-        selection_data = selection.get_data()
+        try:
+            selection_data = selection.data
+        except AttributeError:
+            selection_data = selection.get_data()
         if not selection_data:
             return
         selection_data = selection_data.decode('utf-8')
@@ -314,7 +316,7 @@ class WinCSV(NoModal):
         return self.csv_quotechar.get_text() or '"'
 
     def get_encoding(self):
-        return self.csv_enc.get_active_text() or 'utf_8'
+        return self.csv_enc.get_active_text() or 'utf_8_sig'
 
     def destroy(self):
         super(WinCSV, self).destroy()

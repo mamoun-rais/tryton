@@ -5,16 +5,18 @@ import gettext
 
 from gi.repository import GLib, Gtk
 
-from .widget import Widget
 from tryton import common
-from tryton.common.datetime_ import (Date as DateEntry, Time as TimeEntry,
-    DateTime as DateTimeEntry, add_operators)
+from tryton.common.datetime_ import Date as DateEntry
+from tryton.common.datetime_ import DateTime as DateTimeEntry
+from tryton.common.datetime_ import Time as TimeEntry
+from tryton.common.datetime_ import add_operators
+
+from .widget import Widget
 
 _ = gettext.gettext
 
 
 class Date(Widget):
-    _changed_signal = 'date-changed'
 
     def __init__(self, view, attrs, _entry=DateEntry):
         super(Date, self).__init__(view, attrs)
@@ -25,13 +27,15 @@ class Date(Widget):
         self.real_entry.connect('key_press_event', self.sig_key_press)
         self.real_entry.connect('activate', self.sig_activate)
         self.real_entry.connect('changed', lambda _: self.send_modified())
-        self.real_entry.connect(
-            'focus-out-event', lambda *a: self._focus_out())
-        self.entry.connect(self._changed_signal, self.changed)
+        self.real_entry.connect('focus-out-event',
+            lambda x, y: self._focus_out())
         self.widget.pack_start(self.entry, expand=False, fill=False, padding=0)
 
     @property
     def real_entry(self):
+        return self.entry
+
+    def _color_widget(self):
         return self.entry
 
     def _set_editable(self, value):
@@ -53,13 +57,6 @@ class Date(Widget):
             field_value = self.cast(self.field.get_client(self.record))
             return field_value != self.get_value()
         return False
-
-    def changed(self, widget):
-        def focus_out():
-            if widget.props.window:
-                self._focus_out()
-        # Must be deferred because it triggers a display of the form
-        GLib.idle_add(focus_out)
 
     def sig_key_press(self, widget, event):
         self.send_modified()
@@ -90,10 +87,12 @@ class Date(Widget):
 
 
 class Time(Date):
-    _changed_signal = 'time-changed'
-
     def __init__(self, view, attrs):
         super(Time, self).__init__(view, attrs, _entry=TimeEntry)
+        self.entry.connect('time-changed', self.changed)
+
+    def _color_widget(self):
+        return self.entry.child
 
     def _set_editable(self, value):
         self.entry.set_sensitive(value)
@@ -118,10 +117,17 @@ class Time(Date):
             format_ = '%X'
         self.entry.props.format = format_
 
+    def changed(self, combobox):
+        def focus_out():
+            if combobox.props.window:
+                self._focus_out()
+        # Only when changed from pop list
+        if not combobox.get_child().has_focus():
+            # Must be deferred because it triggers a display of the form
+            GLib.idle_add(focus_out)
+
 
 class DateTime(Date):
-    _changed_signal = 'datetime-changed'
-
     def __init__(self, view, attrs):
         Widget.__init__(self, view, attrs)
 
@@ -135,6 +141,7 @@ class DateTime(Date):
             child.connect('key_press_event', self.sig_key_press)
             child.connect('activate', self.sig_activate)
             child.connect('changed', lambda _: self.send_modified())
+            child.connect('focus-out-event', lambda x, y: self._focus_out())
         self.widget.pack_start(self.entry, expand=False, fill=False, padding=0)
 
     @classmethod

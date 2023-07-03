@@ -2,15 +2,16 @@
 # this repository contains the full copyright notices and license terms.
 import logging
 
-from gi.repository import Gtk, Gdk
+from gi.repository import Gdk, Gtk
+
 try:
     from gi.repository import GtkSpell
 except ImportError:
     GtkSpell = None
 
-from .widget import Widget, TranslateMixin
 from tryton.config import CONFIG
 
+from .widget import TranslateMixin, Widget
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,9 @@ class TextBox(Widget, TranslateMixin):
         self.textview.set_editable(not value)
         if self.button:
             self.button.set_sensitive(not value)
+
+    def _color_widget(self):
+        return self.textview
 
     @property
     def modified(self):

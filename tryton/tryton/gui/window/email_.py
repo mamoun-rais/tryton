@@ -4,20 +4,20 @@ import gettext
 import logging
 import os
 
-from gi.repository import Gtk, GLib, GObject
+from gi.repository import GLib, GObject, Gtk
+
 try:
     from gi.repository import GtkSpell
 except ImportError:
     GtkSpell = None
 
-from tryton.common import IconFactory, Tooltips, RPCExecute, RPCException
+from tryton.common import IconFactory, RPCException, RPCExecute, Tooltips
 from tryton.common.richtext import (
-    register_format, add_toolbar, get_content, set_content)
-from tryton.common.treeviewcontrol import TreeViewControl
+    add_toolbar, get_content, register_format, set_content)
 from tryton.common.underline import set_underline
 from tryton.common.widget_style import widget_class
-from tryton.config import TRYTON_ICON, CONFIG
-from tryton.exceptions import TrytonServerError, TrytonError
+from tryton.config import CONFIG, TRYTON_ICON
+from tryton.exceptions import TrytonError, TrytonServerError
 from tryton.gui import Main
 from tryton.gui.window.nomodal import NoModal
 
@@ -59,7 +59,7 @@ class EmailEntry(Gtk.Entry):
                 results = results()
             except (TrytonError, TrytonServerError):
                 logger.warning(
-                    _("Unable to complete email entry"), exc_info=True)
+                    "Unable to complete email entry", exc_info=True)
                 results = []
             if text != self.get_text():
                 return False
@@ -212,7 +212,7 @@ class Email(NoModal):
         attachment_frame.add(scrolledwindow)
         scrolledwindow.set_policy(
             Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        self.attachments = TreeViewControl()
+        self.attachments = Gtk.TreeView()
         self.attachments.set_headers_visible(False)
         scrolledwindow.add(self.attachments)
         self.attachments.get_selection().set_mode(Gtk.SelectionMode.MULTIPLE)

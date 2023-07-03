@@ -4,10 +4,11 @@ import gettext
 
 from gi.repository import GLib, Gtk
 
-from .widget import Widget, TranslateMixin
-from tryton.common import Tooltips, IconFactory
+from tryton.common import IconFactory, Tooltips
 from tryton.common.entry_position import reset_position
 from tryton.common.selection import PopdownMixin, selection_shortcuts
+
+from .widget import TranslateMixin, Widget
 
 _ = gettext.gettext
 
@@ -79,6 +80,11 @@ class Char(Widget, TranslateMixin, PopdownMixin):
         if not combobox.get_child().has_focus():
             # Must be deferred because it triggers a display of the form
             GLib.idle_add(focus_out)
+
+    def _color_widget(self):
+        if self.autocomplete:
+            return self.entry.get_child()
+        return self.entry
 
     @property
     def modified(self):

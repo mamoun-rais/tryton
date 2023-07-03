@@ -1,10 +1,11 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import json
 import datetime
+import json
 from decimal import Decimal
-from dateutil.relativedelta import relativedelta
 from functools import reduce
+
+from dateutil.relativedelta import relativedelta
 
 
 class PYSON(object):
@@ -160,6 +161,15 @@ class Eval(PYSON):
                     'd': dct['d'],
                     }, context.get(base) or {})
         return context.get(dct['v'], dct['d'])
+
+    @property
+    def basename(self):
+        name = self._value
+        if name.startswith('_parent_'):
+            name = name[len('_parent_'):]
+        if '.' in name:
+            name = name.split('.', 1)[0]
+        return name
 
 
 class Not(PYSON):
@@ -485,11 +495,17 @@ class In(PYSON):
             assert obj.types().issubset({dict, list}), \
                 'obj must be a dict or a list'
             if obj.types() == {dict}:
-                assert isinstance(key, str), 'key must be a string'
+                if isinstance(key, PYSON):
+                    assert key.types() == {str}, 'key must be a string'
+                else:
+                    assert isinstance(key, str), 'key must be a string'
         else:
             assert isinstance(obj, (dict, list))
             if isinstance(obj, dict):
-                assert isinstance(key, str), 'key must be a string'
+                if isinstance(key, PYSON):
+                    assert key.types() == {str}, 'key must be a string'
+                else:
+                    assert isinstance(key, str), 'key must be a string'
         self._key = key
         self._obj = obj
 

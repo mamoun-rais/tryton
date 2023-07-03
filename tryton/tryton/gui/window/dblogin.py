@@ -2,18 +2,20 @@
 # this repository contains the full copyright notices and license terms.
 
 import configparser
-import os
+import datetime
 import gettext
-import threading
 import logging
+import os
+import threading
 
 from gi.repository import GLib, GObject, Gtk
 
-from tryton import __version__
 import tryton.common as common
-from tryton.config import CONFIG, TRYTON_ICON, PIXMAPS_DIR, get_config_dir
 import tryton.rpc as rpc
+from tryton import __version__
+from tryton.common.datetime_ import Date
 from tryton.common.underline import set_underline
+from tryton.config import CONFIG, PIXMAPS_DIR, TRYTON_ICON, get_config_dir
 
 _ = gettext.gettext
 logger = logging.getLogger(__name__)
@@ -277,6 +279,7 @@ class DBListEditor(object):
         Tests if the server version is compatible with the client version
         It returns None if no information on server version is available.
         '''
+        return True
         version = rpc.server_version(host, port)
         if not version:
             return None
@@ -389,7 +392,7 @@ class DBLogin(object):
     def __init__(self):
         # Fake windows to avoid warning about Dialog without transient
         self._window = Gtk.Window()
-        self.dialog = Gtk.Dialog(title="Tryton - " + _('Login'), modal=True)
+        self.dialog = Gtk.Dialog(title="Coog - " + _('Login'), modal=True)
         self.dialog.set_transient_for(self._window)
         self.dialog.set_icon(TRYTON_ICON)
         self.dialog.set_position(Gtk.WindowPosition.CENTER_ALWAYS)
@@ -414,7 +417,7 @@ class DBLogin(object):
         self.dialog.vbox.pack_start(grid, expand=True, fill=True, padding=0)
 
         image = Gtk.Image()
-        image.set_from_file(os.path.join(PIXMAPS_DIR, 'tryton.svg'))
+        image.set_from_file(os.path.join(PIXMAPS_DIR, 'coog_text.svg'))
         image.set_valign(Gtk.Align.START)
         overlay = Gtk.Overlay()
         overlay.add(image)
@@ -480,7 +483,18 @@ class DBLogin(object):
         label_username.set_mnemonic_widget(self.entry_login)
         grid.attach(label_username, 0, 5, 1, 1)
 
-        # Profile information
+        # Date stuff
+        if CONFIG['login.date']:
+            self.label_date = Gtk.Label(
+                label=set_underline(_("Date:")),
+                use_underline=True, halign=Gtk.Align.END)
+            grid.attach(self.label_date, 0, 6, 1, 1)
+            self.entry_date = Date()
+            self.entry_date.props.format = '%d/%m/%Y'
+            self.entry_date.props.value = datetime.date.today()
+            grid.attach(self.entry_date, 1, 6, 2, 1)
+
+        # Profile informations
         self.profile_cfg = os.path.join(get_config_dir(), 'profiles.cfg')
         self.profiles = configparser.ConfigParser()
         if not os.path.exists(self.profile_cfg):
@@ -641,6 +655,8 @@ class DBLogin(object):
             result = (
                 hostname, port, database, self.entry_login.get_text())
 
+        if CONFIG['login.date']:
+            CONFIG['login.date'] = self.entry_date.props.value
         self.dialog.destroy()
         self._window.destroy()
         return response == Gtk.ResponseType.OK

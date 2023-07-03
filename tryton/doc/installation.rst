@@ -4,22 +4,23 @@ Installing tryton
 Installation
 ------------
 
-Once you've downloaded and unpacked a tryton source release, enter the
-directory where the archive was unpacked, and run:
+There are three options to install Tryton:
 
-    ``python setup.py install``
+    * Install the version provided by your operating system distribution.
+      This is the quickest and recommended option for those who has operating
+      system that distributes Tryton.
 
-Note that you may need administrator/root privileges for this step, as
-this command will by default attempt to install tryton to the Python
-site-packages directory on your system.
+    * Install the published package.
+      You first need to have `pip <https://pip.pypa.io/>`_ installed.
+      Then to install ``tryton`` run:
 
-For advanced options, please refer to the easy_install__ and/or the
-distutils__ documentation:
+      .. code-block:: console
 
-__ http://setuptools.readthedocs.io/en/latest/easy_install.html
+         $ python -m pip install tryton
 
-__ http://docs.python.org/inst/inst.html
+    * Without installation, you need to make sure you have all the dependencies
+      installed and then run:
 
-To use without installation, run ``bin/tryton`` from where the archive was
-unpacked.
+      .. code-block:: console
 
+         $ python bin/tryton

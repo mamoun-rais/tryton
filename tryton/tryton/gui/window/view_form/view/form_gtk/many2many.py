@@ -5,13 +5,14 @@ import gettext
 from gi.repository import Gdk, Gtk
 
 import tryton.common as common
-from .widget import Widget
 from tryton.common.completion import get_completion, update_completion
 from tryton.common.domain_parser import quote
 from tryton.common.underline import set_underline
 from tryton.gui.window.view_form.screen import Screen
-from tryton.gui.window.win_search import WinSearch
 from tryton.gui.window.win_form import WinForm
+from tryton.gui.window.win_search import WinSearch
+
+from .widget import Widget
 
 _ = gettext.gettext
 
@@ -46,14 +47,15 @@ class Many2Many(Widget):
         self.wid_text = Gtk.Entry()
         self.wid_text.set_placeholder_text(_('Search'))
         self.wid_text.set_property('width_chars', 13)
-        self.wid_text.connect('focus-out-event', self._focus_out)
+        self.focus_out_id = self.wid_text.connect(
+            'focus-out-event', self._focus_out)
         self.focus_out = True
         hbox.pack_start(self.wid_text, expand=True, fill=True, padding=0)
 
         if int(self.attrs.get('completion', 1)):
             self.wid_completion = get_completion(
-                create=self.attrs.get('create', True)
-                and common.MODELACCESS[self.attrs['relation']]['create'])
+                search=self.read_access,
+                create=self.create_access)
             self.wid_completion.connect('match-selected',
                 self._completion_match_selected)
             self.wid_completion.connect('action-activated',
@@ -83,23 +85,21 @@ class Many2Many(Widget):
 
         frame = Gtk.Frame()
         frame.add(hbox)
-        frame.set_shadow_type(Gtk.ShadowType.OUT)
-        vbox.pack_start(frame, expand=False, fill=True, padding=0)
+        # XXX: support expand_toolbar
+        if attrs.get('expand_toolbar'):
+            frame.set_shadow_type(Gtk.ShadowType.NONE)
+        else:
+            frame.set_shadow_type(Gtk.ShadowType.OUT)
+            vbox.pack_start(frame, expand=False, fill=True, padding=0)
 
-        model = attrs['relation']
-        breadcrumb = list(self.view.screen.breadcrumb)
-        breadcrumb.append(
-            attrs.get('string') or common.MODELNAME.get(model))
-        self.screen = Screen(model,
+        self.screen = Screen(attrs['relation'],
             view_ids=attrs.get('view_ids', '').split(','),
             mode=['tree'], views_preload=attrs.get('views', {}),
             order=attrs.get('order'),
             row_activate=self._on_activate,
             readonly=True,
-            limit=None,
-            context=self.view.screen.context,
-            breadcrumb=breadcrumb)
-        self.screen.signal_connect(self, 'record-message', self._sig_label)
+            limit=None)
+        self.screen.windows.append(self)
 
         vbox.pack_start(self.screen.widget, expand=True, fill=True, padding=0)
 
@@ -108,6 +108,11 @@ class Many2Many(Widget):
 
         self.screen.widget.connect('key_press_event', self.on_keypress)
         self.wid_text.connect('key_press_event', self.on_keypress)
+
+    def _color_widget(self):
+        if hasattr(self.screen.current_view, 'treeview'):
+            return self.screen.current_view.treeview
+        return super(Many2Many, self)._color_widget()
 
     def on_keypress(self, widget, event):
         editable = self.wid_text.get_editable()
@@ -138,8 +143,23 @@ class Many2Many(Widget):
         return False
 
     def destroy(self):
-        self.wid_text.disconnect_by_func(self._focus_out)
+        self.wid_text.disconnect(self.focus_out_id)
         self.screen.destroy()
+
+    def get_access(self, type_):
+        model = self.attrs['relation']
+        if model:
+            return common.MODELACCESS[model][type_]
+        else:
+            return True
+
+    @property
+    def read_access(self):
+        return self.get_access('read')
+
+    @property
+    def create_access(self):
+        return int(self.attrs.get('create', 1)) and self.get_access('create')
 
     def _sig_add(self, *args):
         if not self.focus_out:
@@ -166,14 +186,11 @@ class Many2Many(Widget):
             context=context, domain=domain, order=order,
             view_ids=self.attrs.get('view_ids', '').split(','),
             views_preload=self.attrs.get('views', {}),
-            new=self.attrs.get('create', True),
+            new=self.create_access,
             title=self.attrs.get('string'))
         win.screen.search_filter(quote(value))
         if len(win.screen.group) == 1:
-            callback([
-                    (r.id, r.value.get('rec_name', ''))
-                    for r in win.screen.group])
-            win.destroy()
+            win.response(None, Gtk.ResponseType.OK)
         else:
             win.show()
 
@@ -263,8 +280,8 @@ class Many2Many(Widget):
                 not self._readonly
                 and self._position))
 
-    def _sig_label(self, screen, signal_data):
-        self._position = signal_data[0]
+    def record_message(self, position, *args):
+        self._position = position
         self._set_button_sensitive()
 
     def display(self):

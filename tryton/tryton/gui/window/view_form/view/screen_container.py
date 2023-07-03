@@ -6,9 +6,8 @@ import gettext
 from gi.repository import Gdk, GLib, GObject, Gtk
 
 import tryton.common as common
+from tryton.common.datetime_ import Date, DateTime, Time, add_operators
 from tryton.common.domain_parser import quote
-from tryton.common.treeviewcontrol import TreeViewControl
-from tryton.common.datetime_ import Date, Time, DateTime, add_operators
 from tryton.common.number_entry import NumberEntry
 from tryton.pyson import PYSONDecoder
 
@@ -43,8 +42,9 @@ class Between(Gtk.HBox):
                 pass
 
     def get_value(self):
-        from_ = self._get_value(self.from_)
-        to = self._get_value(self.to)
+        # Coog Specific: see #21005
+        from_ = self._get_formatted_value(self.from_)
+        to = self._get_formatted_value(self.to)
         if from_ and to:
             if from_ != to:
                 return '%s..%s' % (quote(from_), quote(to))
@@ -58,6 +58,10 @@ class Between(Gtk.HBox):
     def _get_value(self, entry):
         raise NotImplementedError
 
+    def _get_formatted_value(self, widget):
+        # Coog Specific: see #21005
+        raise NotImplementedError
+
     def set_value(self, from_, to):
         self._set_value(self.from_, from_)
         self._set_value(self.to, to)
@@ -66,7 +70,11 @@ class Between(Gtk.HBox):
         raise NotImplementedError
 
     def _from_changed(self, widget):
-        self._set_value(self.to, self._get_value(self.from_))
+        # Coog Specific: see #21005
+        from_value = self._get_value(self.from_)
+        to_value = self._get_value(self.to)
+        if from_value and (not to_value or to_value < from_value):
+            self._set_value(self.to, from_value)
 
 
 class WithOperators:
@@ -95,7 +103,12 @@ class Dates(BetweenDates):
     _changed_signal = 'date-changed'
 
     def _get_value(self, widget):
-        value = widget.props.value
+        # Coog Specific: see #21005
+        return widget.props.value
+
+    def _get_formatted_value(self, widget):
+        # Coog Specific: see #21005
+        value = self._get_value(widget)
         if value:
             return value.strftime(widget.props.format)
 
@@ -109,7 +122,11 @@ class Times(BetweenDates):
         return [self.from_.get_child(), self.to.get_child()]
 
     def _get_value(self, widget):
-        value = widget.props.value
+        return widget.props.value
+
+    def _get_formatted_value(self, widget):
+        # Coog Specific: see #21005
+        value = self._get_value(widget)
         if value:
             return datetime.time.strftime(value, widget.props.format)
 
@@ -130,7 +147,11 @@ class DateTimes(BetweenDates):
         return self.from_.get_children() + self.to.get_children()
 
     def _get_value(self, widget):
-        value = widget.props.value
+        return widget.props.value
+
+    def _get_formatted_value(self, widget):
+        # Coog Specific: see #21005
+        value = self._get_value(widget)
         if value:
             return value.strftime(
                 widget.props.date_format + ' ' + widget.props.time_format)
@@ -145,6 +166,9 @@ class Numbers(Between):
     def _get_value(self, widget):
         return widget.get_text()
 
+    # Coog Specific: see #21005
+    _get_formatted_value = _get_value
+
     def _set_value(self, entry, value):
         entry.set_text(value or '')
 
@@ -153,7 +177,7 @@ class Selection(Gtk.ScrolledWindow):
 
     def __init__(self, selections):
         super(Selection, self).__init__()
-        self.treeview = TreeViewControl()
+        self.treeview = Gtk.TreeView()
         model = Gtk.ListStore(GObject.TYPE_STRING)
         for selection in selections:
             model.append((selection,))
@@ -492,7 +516,17 @@ class ScreenContainer(object):
         idx = self.get_tab_index()
         if idx < 0:
             return []
-        return self.tab_domain[idx][1]
+        ctx, domain = self.tab_domain[idx][1]
+        decoder = PYSONDecoder(ctx)
+        return decoder.decode(domain)
+
+    # JCA : Allow to get the resolved domain for any index
+    def get_tab_domain_for_idx(self, idx):
+        if idx < 0:
+            return []
+        ctx, domain = self.tab_domain[idx][1]
+        decoder = PYSONDecoder(ctx)
+        return decoder.decode(domain)
 
     def set_tab_counter(self, count, idx=None):
         if not self.tab_counter or not self.notebook:
@@ -507,7 +541,10 @@ class ScreenContainer(object):
             label.set_label('')
             tooltip.set_tip(label, '')
         else:
-            tooltip.set_tip(label, '%d' % count)
+            tip = common.humanize(count)
+            if count >= 1000:
+                tip += '+'
+            tooltip.set_tip(label, tip)
             fmt = '(%d)'
             if count > 99:
                 fmt = '(%d+)'
@@ -527,6 +564,10 @@ class ScreenContainer(object):
             self.do_search(widget)
 
     def do_search(self, widget=None):
+        searched_text = self.get_text()
+        if searched_text != self.last_search_text:
+            self.last_search_text = searched_text
+            self.screen.offset = 0
         self.screen.search_filter(self.get_text())
 
     def set_cursor(self, new=False, reset_view=True):
@@ -542,7 +583,6 @@ class ScreenContainer(object):
         GLib.idle_add(keypress)
 
     def icon_press(self, widget, icon_pos, event):
-        widget.grab_focus()
         if icon_pos == Gtk.EntryIconPosition.PRIMARY:
             self.search_box(widget)
         elif icon_pos == Gtk.EntryIconPosition.SECONDARY:

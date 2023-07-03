@@ -1,29 +1,35 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import sys
+import ast
+import gettext
 import json
 import locale
-import gettext
+import logging
+import sys
 from functools import wraps
 
-from gi.repository import Gdk, GLib, GObject, Gtk
+from gi.repository import Gdk, GLib, GObject, Gtk, Pango
 from pygtkcompat.generictreemodel import GenericTreeModel
 
-from tryton.config import CONFIG
-from tryton.common.cellrendererbutton import CellRendererButton
-from tryton.gui.window import Window
-from tryton.common.popup_menu import populate
-from tryton.common import RPCExecute, RPCException, node_attributes, Tooltips
-from tryton.common import domain_inversion, simplify, unique_value
-from tryton.pyson import PYSONDecoder
 import tryton.common as common
+from tryton.common import (
+    COLOR_RGB, FORMAT_ERROR, RPCException, RPCExecute, Tooltips,
+    domain_inversion, node_attributes, simplify, unique_value)
+from tryton.common.cellrendererbutton import CellRendererButton
+from tryton.common.popup_menu import populate
+from tryton.config import CONFIG
+from tryton.gui.window import Window
+from tryton.pyson import PYSONDecoder
+
 from . import View, XMLViewParser
 from .list_gtk.editabletree import EditableTreeView, TreeView
-from .list_gtk.widget import (Affix, Char, Text, Int, Boolean, URL, Date,
-    Time, Float, TimeDelta, Binary, M2O, O2O, O2M, M2M, Selection,
-    MultiSelection, Reference, Dict, ProgressBar, Button, Image)
+from .list_gtk.widget import (
+    M2M, M2O, O2M, O2O, URL, Affix, Binary, Boolean, Button, Char, Date, Dict,
+    Float, Image, Int, MultiSelection, ProgressBar, Reference, Selection, Text,
+    Time, TimeDelta)
 
 _ = gettext.gettext
+logger = logging.getLogger(__name__)
 
 
 def delay(func):
@@ -51,7 +57,8 @@ def path_convert_id2pos(model, id_path):
         try:
             record = group.get(current_id)
             indexes.append(group.index(record))
-            group = record.children_group(model.children_field)
+            group = record.children_group(model.children_field,
+                model.children_definitions)
         except (KeyError, AttributeError, ValueError):
             return None
     return tuple(indexes)
@@ -59,11 +66,12 @@ def path_convert_id2pos(model, id_path):
 
 class AdaptModelGroup(GenericTreeModel):
 
-    def __init__(self, group, children_field=None):
+    def __init__(self, group, children_field=None, children_definitions=None):
         super(AdaptModelGroup, self).__init__()
         self.group = group
         self.set_property('leak_references', False)
         self.children_field = children_field
+        self.children_definitions = children_definitions or []
         self.__removed = None  # XXX dirty hack to allow update of has_child
 
     def added(self, group, record):
@@ -73,7 +81,8 @@ class AdaptModelGroup(GenericTreeModel):
             path = record.get_index_path(self.group)
             iter_ = self.get_iter(path)
             self.row_inserted(path, iter_)
-            if record.children_group(self.children_field):
+            if record.children_group(self.children_field,
+                    self.children_definitions):
                 self.row_has_child_toggled(path, iter_)
             if (record.parent
                     and record.group is not self.group):
@@ -128,7 +137,8 @@ class AdaptModelGroup(GenericTreeModel):
     def move_into(self, record, path):
         iter_ = self.get_iter(path)
         parent = self.get_value(iter_, 0)
-        group = parent.children_group(self.children_field)
+        group = parent.children_group(self.children_field,
+            self.children_definitions)
         if group is not record.group:
             record.group.remove(record, remove=True, force_remove=True)
             # Don't remove record from previous group
@@ -191,7 +201,10 @@ class AdaptModelGroup(GenericTreeModel):
             record = group[i]
             if not self.children_field:
                 break
-            group = record.children_group(self.children_field)
+            if self.children_field not in group.fields:
+                break
+            group = record.children_group(self.children_field,
+                self.children_definitions)
         return record
 
     def on_get_value(self, record, column):
@@ -205,7 +218,12 @@ class AdaptModelGroup(GenericTreeModel):
     def on_iter_has_child(self, record):
         if record is None or not self.children_field:
             return False
-        children = record.children_group(self.children_field)
+        if (record.model_name not in self.children_definitions
+                or self.children_field not in
+                self.children_definitions[record.model_name]):
+            return False
+        children = record.children_group(self.children_field,
+            self.children_definitions)
         if children is None:
             return False
         length = len(children)
@@ -220,7 +238,8 @@ class AdaptModelGroup(GenericTreeModel):
             else:
                 return None
         if self.children_field:
-            children = record.children_group(self.children_field)
+            children = record.children_group(self.children_field,
+                self.children_definitions)
             if children:
                 return children[0]
         return None
@@ -230,7 +249,8 @@ class AdaptModelGroup(GenericTreeModel):
             return len(self.group)
         if not self.children_field:
             return 0
-        return len(record.children_group(self.children_field))
+        return len(record.children_group(self.children_field,
+            self.children_definitions))
 
     def on_iter_nth_child(self, record, nth):
         if record is None:
@@ -239,8 +259,10 @@ class AdaptModelGroup(GenericTreeModel):
             return None
         if not self.children_field:
             return None
-        if nth < len(record.children_group(self.children_field)):
-            return record.children_group(self.children_field)[nth]
+        if nth < len(record.children_group(self.children_field,
+                    self.children_definitions)):
+            return record.children_group(self.children_field,
+                self.children_definitions)[nth]
         return None
 
     def on_iter_parent(self, record):
@@ -285,6 +307,10 @@ class TreeXMLViewParser(XMLViewParser):
 
     def _parse_field(self, node, attributes):
         name = attributes['name']
+
+        # RSE Display more useful info when trying to display unexisting field
+        if 'widget' not in attributes:
+            raise Exception('Unknown field %s' % attributes['name'])
         widget = self.WIDGETS[attributes['widget']](self.view, attributes)
         self.view.widgets[name].append(widget)
 
@@ -302,6 +328,7 @@ class TreeXMLViewParser(XMLViewParser):
 
         for affix in node.childNodes:
             affix_attrs = node_attributes(affix)
+            affix_attrs['visual'] = attributes.get('visual')
             if 'name' not in affix_attrs:
                 affix_attrs['name'] = attributes['name']
             if affix.tagName == 'prefix':
@@ -330,7 +357,12 @@ class TreeXMLViewParser(XMLViewParser):
 
         self.view.treeview.append_column(column)
 
+        if 'optional' in attributes:
+            self.view.optionals.append(column)
+
         if 'sum' in attributes:
+            highlight_sum_ = attributes.get('highlight_sum', '0')
+
             text = attributes['sum'] + _(':')
             label, sum_ = Gtk.Label(label=text), Gtk.Label()
 
@@ -341,7 +373,8 @@ class TreeXMLViewParser(XMLViewParser):
             self.view.sum_box.pack_start(
                 hbox, expand=False, fill=False, padding=0)
 
-            self.view.sum_widgets.append((attributes['name'], sum_))
+            self.view.sum_widgets.append(
+                (attributes['name'], sum_, highlight_sum_))
 
     def _parse_button(self, node, attributes):
         button = Button(self.view, attributes)
@@ -362,6 +395,52 @@ class TreeXMLViewParser(XMLViewParser):
 
         self.view.treeview.append_column(column)
 
+    # ABD: See #3428
+    def _set_background(self, value, attrlist):
+        if value not in COLOR_RGB:
+            logger.info('This color is not supported => %s' % value)
+        color = COLOR_RGB.get(value, COLOR_RGB['black'])
+        if hasattr(Pango, 'AttrBackground'):
+            attrlist.change(Pango.AttrBackground(
+                    color[0], color[1], color[2], 0, -1))
+
+    def _set_foreground(self, value, attrlist):
+        if value not in COLOR_RGB:
+            logger.info('This color is not supported => %s' % value)
+        color = COLOR_RGB.get(value, COLOR_RGB['black'])
+        if hasattr(Pango, 'AttrForeground'):
+            attrlist.change(Pango.AttrForeground(
+                    color[0], color[1], color[2], 0, -1))
+
+    def _set_font(self, value, attrlist):
+        attrlist.change(Pango.AttrFontDesc(
+                Pango.FontDescription(value), 0, -1))
+
+    def _format_set(self, attrs, attrlist):
+        functions = {
+            'color': self._set_foreground,
+            'fg': self._set_foreground,
+            'bg': self._set_background,
+            'font': self._set_font
+            }
+        if not getattr(attrs, 'states', None):
+            return
+        states = ast.literal_eval(attrs['states'])
+        for attr in list(states.keys()):
+            if not states[attr]:
+                continue
+            key = attr.split('_')
+            if key[0] == 'field':
+                continue
+            if key[0] == 'label':
+                key = key[1:]
+            if isinstance(states[attr], str):
+                key.append(states[attr])
+            if key[0] in functions:
+                if len(key) != 2:
+                    raise ValueError(FORMAT_ERROR + attr)
+                functions[key[0]](key[1], attrlist)
+
     def _set_column_widget(self, column, attributes, arrow=True, align=0.5):
         hbox = Gtk.HBox(homogeneous=False, spacing=2)
         label = Gtk.Label(label=attributes['string'])
@@ -370,6 +449,9 @@ class TreeXMLViewParser(XMLViewParser):
             required = field.get('required')
             readonly = field.get('readonly')
             common.apply_label_attributes(label, readonly, required)
+        attrlist = Pango.AttrList()
+        self._format_set(attributes, attrlist)
+        label.set_attributes(attrlist)
         label.show()
         help = attributes.get('help')
         if help:
@@ -429,14 +511,20 @@ class ViewTree(View):
     xml_parser = TreeXMLViewParser
     draggable = False
 
-    def __init__(self, view_id, screen, xml, children_field):
+    def __init__(self, view_id, screen, xml, children_field,
+            children_definitions):
         self.children_field = children_field
+        self.children_definitions = children_definitions
+        self.optionals = []
         self.sum_widgets = []
         self.sum_box = Gtk.HBox()
         self.treeview = None
         self._editable = bool(int(xml.getAttribute('editable') or 0))
+        self._creatable = bool(int(xml.getAttribute('creatable') or 1))
         if self._editable:
-            self.treeview = EditableTreeView(self)
+            # ABD: Pass self.attributes.get('editable_open') to constructor
+            self.treeview = EditableTreeView(
+                self, xml.getAttribute('editable_open'))
             grid_lines = Gtk.TreeViewGridLines.BOTH
         else:
             self.treeview = TreeView(self)
@@ -446,17 +534,7 @@ class ViewTree(View):
         self.set_drag_and_drop()
 
         self.mnemonic_widget = self.treeview
-
-        # Add last column if necessary
-        for column in self.treeview.get_columns():
-            if column.get_expand():
-                break
-        else:
-            column = Gtk.TreeViewColumn()
-            column._type = 'fill'
-            column.name = None
-            column.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
-            self.treeview.append_column(column)
+        self.always_expand = bool(xml.getAttribute('always_expand'))
 
         self.treeview.set_property('enable-grid-lines', grid_lines)
         self.treeview.set_fixed_height_mode(
@@ -467,6 +545,8 @@ class ViewTree(View):
         self.treeview.connect_after('row-activated', self.__sig_switch)
         if self.children_field:
             self.treeview.connect('test-expand-row', self.test_expand_row)
+            self.treeview.connect('row-expanded', self._row_expanded)
+            self.treeview.connect('row-collapsed', self._row_collapsed)
         self.treeview.set_rubber_banding(True)
 
         selection = self.treeview.get_selection()
@@ -490,6 +570,17 @@ class ViewTree(View):
         self.treeview.set_search_equal_func(self.search_equal_func)
 
         self.display()
+
+        # Add last column if necessary after display for updated visible
+        for column in self.treeview.get_columns():
+            if column.get_expand() and column.get_visible():
+                break
+        else:
+            column = Gtk.TreeViewColumn()
+            column._type = 'fill'
+            column.name = None
+            column.set_sizing(Gtk.TreeViewColumnSizing.FIXED)
+            self.treeview.append_column(column)
 
     def get_column_widget(self, column):
         'Return the widget of the column'
@@ -623,6 +714,10 @@ class ViewTree(View):
     def editable(self):
         return self._editable and not self.screen.readonly
 
+    @property
+    def creatable(self):
+        return self.editable and self._creatable
+
     def get_fields(self, visible_only=False):
         return [col.name for col in self.treeview.get_columns()
             if col.name and (not visible_only or col.get_visible())]
@@ -646,10 +741,6 @@ class ViewTree(View):
 
     def test_expand_row(self, widget, iter_, path):
         model = widget.get_model()
-        if model.iter_n_children(iter_) > CONFIG['client.limit']:
-            self.record = model.get_value(iter_, 0)
-            self.screen.switch_view('form')
-            return True
         iter_ = model.iter_children(iter_)
         if not iter_:
             return False
@@ -664,6 +755,12 @@ class ViewTree(View):
                         return True
             iter_ = model.iter_next(iter_)
         return False
+
+    def _row_expanded(self, treeview, iter_, path):
+        # Force record_message
+        self.screen.current_record = self.screen.current_record
+
+    _row_collapsed = _row_expanded
 
     def on_copy(self):
         for clipboard_type in [
@@ -905,14 +1002,16 @@ class ViewTree(View):
             return True
         return False
 
-    def group_list_changed(self, group, signal):
+    def group_list_changed(self, group, action, *args):
         model = self.treeview.get_model()
         if model is not None:
-            if signal[0] == 'record-added':
-                model.added(group, signal[1])
-            elif signal[0] == 'record-removed':
-                model.removed(group, signal[1])
-        self.display()
+            if action == 'record-added':
+                record, pos = args
+                model.added(group, record)
+            elif action == 'record-removed':
+                record, pos = args
+                model.removed(group, record)
+        self.display(force=action == 'group-cleared')
 
     def __str__(self):
         return 'ViewList (%d)' % id(self)
@@ -967,52 +1066,70 @@ class ViewTree(View):
                     treeview.expand_row(path, False)
 
     def __select_changed(self, tree_sel):
-        previous_record = self.record
-        if previous_record and previous_record not in previous_record.group:
-            previous_record = None
+        def do_selection_changed():
+            previous_record = self.record
+            if (previous_record
+                    and (previous_record not in previous_record.group 
+                        or previous_record.destroyed)):
+                previous_record = None
 
-        if tree_sel.get_mode() == Gtk.SelectionMode.SINGLE:
-            model, iter_ = tree_sel.get_selected()
-            if model and iter_:
-                record = model.get_value(iter_, 0)
-                self.record = record
-            else:
-                self.record = None
+            # Because do_selection_changed is call through an idle_add it can
+            # be called when the treeview of the selection has had it's
+            # underlying model modified we should thus check if the treeview
+            # linked to the selections still exists
+            has_treeview = tree_sel.get_tree_view() is not None
+            if has_treeview:
+                if tree_sel.get_mode() == Gtk.SelectionMode.SINGLE:
+                    model, iter_ = tree_sel.get_selected()
+                    if model and iter_:
+                        record = model.get_value(iter_, 0)
+                        self.record = record
+                    else:
+                        self.record = None
 
-        elif tree_sel.get_mode() == Gtk.SelectionMode.MULTIPLE:
-            model, paths = tree_sel.get_selected_rows()
-            if model and paths:
-                iter_ = model.get_iter(paths[0])
-                record = model.get_value(iter_, 0)
-                self.record = record
-            else:
-                self.record = None
+                elif tree_sel.get_mode() == Gtk.SelectionMode.MULTIPLE:
+                    model, paths = tree_sel.get_selected_rows()
+                    if model and paths:
+                        iter_ = model.get_iter(paths[0])
+                        record = model.get_value(iter_, 0)
+                        self.record = record
+                    else:
+                        self.record = None
 
-        if self.editable and previous_record:
-            def go_previous():
-                self.record = previous_record
-                self.set_cursor()
-            if not self.screen.parent and previous_record != self.record:
+            if self.editable and previous_record:
+                def go_previous():
+                    self.record = previous_record
+                    self.set_cursor()
+                if not self.screen.parent and previous_record != self.record:
 
-                def save():
-                    if not previous_record.destroyed:
-                        if not previous_record.save():
-                            go_previous()
+                    def save():
+                        if not previous_record.destroyed:
+                            if not previous_record.save():
+                                go_previous()
 
-                if not previous_record.validate(self.get_fields()):
-                    go_previous()
-                    return True
-                # Delay the save to let GTK process the current event
-                GLib.idle_add(save)
-            elif previous_record != self.record and self.screen.pre_validate:
+                    if not previous_record.validate(self.get_fields()):
+                        go_previous()
+                        return True
+                    # Delay the save to let GTK process the current event
+                    GLib.idle_add(save)
+                elif (previous_record != self.record
+                        and self.screen.pre_validate):
 
-                def pre_validate():
-                    if not previous_record.destroyed:
-                        if not previous_record.pre_validate():
-                            go_previous()
-                # Delay the pre_validate to let GTK process the current event
-                GLib.idle_add(pre_validate)
-        self.update_sum()
+                    def pre_validate():
+                        if not previous_record.destroyed:
+                            if not previous_record.pre_validate():
+                                go_previous()
+                    # Delay the pre_validate to let GTK process the current
+                    # event
+                    GLib.idle_add(pre_validate)
+            self.update_sum()
+
+        if self.screen._multiview_form:
+            tree, *forms = self.screen._multiview_form.widget_groups[\
+                self.screen._multiview_group]
+            for form in forms:
+                form.set_value()
+        do_selection_changed()
 
     def set_value(self):
         if self.editable:
@@ -1027,14 +1144,17 @@ class ViewTree(View):
         if (force
                 or not self.treeview.get_model()
                 or self.group != self.treeview.get_model().group):
-            model = AdaptModelGroup(self.group, self.children_field)
+            model = AdaptModelGroup(self.group, self.children_field,
+                self.children_definitions)
             self.treeview.set_model(model)
             # __select_changed resets current_record to None
             self.record = current_record
             if current_record:
                 selection = self.treeview.get_selection()
                 path = current_record.get_index_path(model.group)
-                selection.select_path(path)
+                # JCA : Check selection is not empty before updateing path
+                if selection:
+                    selection.select_path(path)
             # The search column must be set each time the model is changed
             self.treeview.set_search_column(0)
         if not current_record:
@@ -1049,7 +1169,7 @@ class ViewTree(View):
         # Set column visibility depending on attributes and domain
         domain = []
         if self.screen.domain:
-            domain.append(self.screen.domain)
+            domain.append(self.screen.get_domain())
         tab_domain = self.screen.screen_container.get_tab_domain()
         if tab_domain:
             domain.append(tab_domain)
@@ -1061,7 +1181,8 @@ class ViewTree(View):
                 continue
             widget = self.get_column_widget(column)
             widget.set_editable()
-            if decoder.decode(widget.attrs.get('tree_invisible', '0')):
+            invisible = decoder.decode(widget.attrs.get('tree_invisible', '0'))
+            if invisible:
                 column.set_visible(False)
             elif name == self.screen.exclude_field:
                 column.set_visible(False)
@@ -1073,7 +1194,7 @@ class ViewTree(View):
                 column.set_visible(not unique or bool(self.children_field))
         if self.children_field:
             for i, column in enumerate(self.treeview.get_columns()):
-                if self.draggable and not i:
+                if (self.draggable or self.optionals) and not i:
                     continue
                 if column.get_visible():
                     self.treeview.set_expander_column(column)
@@ -1090,7 +1211,7 @@ class ViewTree(View):
     @delay
     def update_sum(self):
         selected_records = self.selected_records
-        for name, label in self.sum_widgets:
+        for name, label, highlight_sum_ in self.sum_widgets:
             sum_ = None
             selected_sum = None
             loaded = True
@@ -1134,15 +1255,22 @@ class ViewTree(View):
                         '{}'.format(selected_sum or 0), True)
                     sum_ = locale.localize('{}'.format(sum_ or 0), True)
 
-                text = '%s / %s' % (selected_sum, sum_)
+                # coog specific feature #8374
+                text1 = '%s /' % (selected_sum)
+                text2 = ' %s' % (sum_)
+
             else:
-                text = '-'
-            label.set_text(text)
+                text1 = ''
+                text2 = '-'
+            if highlight_sum_ == "1":
+                label.set_markup(text1 + '<b>' + text2 + '</b>')
+            else:
+                label.set_markup(text1 + text2)
 
     def set_cursor(self, new=False, reset_view=True):
         self.treeview.grab_focus()
         model = self.treeview.get_model()
-        if self.record and model and self.treeview.get_realized():
+        if self.record and model:
             path = self.record.get_index_path(model.group)
             if model.get_flags() & Gtk.TreeModelFlags.LIST_ONLY:
                 path = (path[0],)
@@ -1269,7 +1397,36 @@ class ViewTree(View):
 
     def expand_nodes(self, nodes):
         model = self.treeview.get_model()
-        for node in nodes:
-            expand_path = path_convert_id2pos(model, node)
-            if expand_path:
-                self.treeview.expand_to_path(Gtk.TreePath(expand_path))
+        # JCA : Manage always_expand attribute to force tree expansion
+        if self.view_type == 'tree' and self.always_expand:
+            group = model.group
+
+            def get_all_sub_records(group, record, cur_expand_path,
+                    to_expand):
+                if group is None:
+                    try:
+                        group = record.children_group(model.children_field,
+                            model.children_definitions)
+                    except AttributeError:
+                        return
+                if group is None:
+                    return
+                cur_expand_path.append(0)
+                for i in range(len(group)):
+                    cur_expand_path[-1] = i
+                    to_expand += [list(cur_expand_path)]
+                    get_all_sub_records(None, group[i], cur_expand_path,
+                        to_expand)
+                cur_expand_path.pop(-1)
+
+            cur_expand_path = []
+            to_expand = []
+            get_all_sub_records(group, None, cur_expand_path, to_expand)
+            for path in to_expand:
+                tree_path = Gtk.TreePath.new_from_indices(path)
+                self.treeview.expand_to_path(tree_path)
+        else:
+            for node in nodes:
+                expand_path = path_convert_id2pos(model, node)
+                if expand_path:
+                    self.treeview.expand_to_path(Gtk.TreePath(expand_path))

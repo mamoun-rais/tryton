@@ -4,15 +4,16 @@ import gettext
 
 from gi.repository import Gdk, GLib, Gtk
 
-from .widget import Widget
 import tryton.common as common
-from tryton.gui.window.view_form.screen import Screen
-from tryton.gui.window.win_search import WinSearch
-from tryton.gui.window.win_form import WinForm
-from tryton.common.popup_menu import populate
 from tryton.common.completion import get_completion, update_completion
-from tryton.common.entry_position import reset_position
 from tryton.common.domain_parser import quote
+from tryton.common.entry_position import reset_position
+from tryton.common.popup_menu import populate
+from tryton.gui.window.view_form.screen import Screen
+from tryton.gui.window.win_form import WinForm
+from tryton.gui.window.win_search import WinSearch
+
+from .widget import Widget
 
 _ = gettext.gettext
 
@@ -74,7 +75,7 @@ class Many2One(Widget):
 
     @property
     def create_access(self):
-        return self.attrs.get('create', True) and self.get_access('create')
+        return int(self.attrs.get('create', 1)) and self.get_access('create')
 
     @property
     def modified(self):
@@ -82,6 +83,9 @@ class Many2One(Widget):
             value = self.wid_text.get_text()
             return self.field.get_client(self.record) != value
         return False
+
+    def _color_widget(self):
+        return self.wid_text
 
     @staticmethod
     def has_target(value):
@@ -136,10 +140,7 @@ class Many2One(Widget):
                     exclude_field=self.attrs.get('relation_field'))
                 win.screen.search_filter(quote(text))
                 if len(win.screen.group) == 1:
-                    callback([
-                            (r.id, r.value.get('rec_name', ''))
-                            for r in win.screen.group])
-                    win.destroy()
+                    win.response(None, Gtk.ResponseType.OK)
                 else:
                     win.show()
                 return
@@ -166,8 +167,7 @@ class Many2One(Widget):
             breadcrumb=breadcrumb)
 
     def sig_new(self, *args):
-        model = self.get_model()
-        if not model or not common.MODELACCESS[model]['create']:
+        if not self.create_access:
             return
         self.focus_out = False
         screen = self.get_screen(search=True)
@@ -182,8 +182,6 @@ class Many2One(Widget):
             rec_name=self.wid_text.get_text())
 
     def sig_edit(self, entry=None, icon_pos=None, *args):
-        if entry:
-            entry.grab_focus()
         model = self.get_model()
         if not model or not common.MODELACCESS[model]['read']:
             return

@@ -1,31 +1,29 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of this
 # repository contains the full copyright notices and license terms.
 
-import operator
-import locale
 import decimal
 import gettext
-from collections import defaultdict
+import locale
+import operator
 from decimal import Decimal
 
 from gi.repository import GLib, GObject, Gtk
 
-from .widget import Widget
-
-from tryton.gui.window.win_search import WinSearch
-from tryton.common import Tooltips, timezoned_date, untimezoned_date, \
-        IconFactory
-from tryton.common.selection import selection_shortcuts
+from tryton.common import (
+    IconFactory, Tooltips, timezoned_date, untimezoned_date)
 from tryton.common.completion import get_completion, update_completion
 from tryton.common.datetime_ import Date, DateTime, add_operators
+from tryton.common.domain_inversion import eval_domain
 from tryton.common.domain_parser import quote
 from tryton.common.entry_position import reset_position
 from tryton.common.number_entry import NumberEntry
+from tryton.common.selection import selection_shortcuts
 from tryton.common.underline import set_underline
-from tryton.common.domain_inversion import eval_domain
 from tryton.common.widget_style import widget_class
-from tryton.common.treeviewcontrol import TreeViewControl
+from tryton.gui.window.win_search import WinSearch
 from tryton.pyson import PYSONDecoder
+
+from .widget import Widget
 
 _ = gettext.gettext
 
@@ -38,7 +36,7 @@ class DictEntry(object):
         self.name = name
         self.definition = parent_widget.field.keys[name]
         self.parent_widget = parent_widget
-        self._signal_handlers = defaultdict(list)
+        self.signals = []
         self.widget = self.create_widget()
         if self.definition.get('help'):
             parent_widget.tooltips.set_tip(
@@ -46,14 +44,14 @@ class DictEntry(object):
 
     def create_widget(self):
         widget = Gtk.Entry()
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('key-press-event',
                 self.parent_widget.send_modified))
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
         widget.props.activates_default = True
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('activate',
                 self.parent_widget.sig_activate))
         return widget
@@ -72,18 +70,23 @@ class DictEntry(object):
         self.widget.set_editable(not readonly)
 
     def disconnect_signals(self):
-        for widget, signal_ids in self._signal_handlers.items():
-            for handler_id in signal_ids:
-                widget.disconnect(handler_id)
+        for handler_id in self.signals:
+            self.widget.disconnect(handler_id)
+
+
+class DictCharEntry(DictEntry):
+
+    def modified(self, value):
+        return self.get_value() != (value.get(self.name, '') or '')
 
 
 class DictBooleanEntry(DictEntry):
 
     def create_widget(self):
         widget = Gtk.CheckButton()
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('toggled', self.parent_widget.sig_activate))
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
         return widget
@@ -113,13 +116,10 @@ class DictSelectionEntry(DictEntry):
         # customizing entry
         child = widget.get_child()
         child.props.activates_default = True
-        self._signal_handlers[child].append(
-            child.connect('changed', self._changed))
-        self._signal_handlers[child].append(
-            child.connect('focus-out-event',
+        self.signals.append(child.connect('changed', self._changed))
+        self.signals.append(child.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
-        self._signal_handlers[child].append(
-            child.connect('activate',
+        self.signals.append(child.connect('activate',
                 lambda w: self.parent_widget._focus_out()))
         widget.connect(
             'scroll-event',
@@ -155,6 +155,11 @@ class DictSelectionEntry(DictEntry):
             if selection[1] == value:
                 GLib.idle_add(self.widget.set_active, i)
                 break
+
+    def disconnect_signals(self):
+        child = self.widget.get_child()
+        for handler_id in self.signals:
+            child.disconnect(handler_id)
 
     def get_value(self):
         active = self.widget.get_active()
@@ -198,26 +203,30 @@ class DictMultiSelectionEntry(DictEntry):
         widget.set_size_request(100, 100)
 
         model = Gtk.ListStore(GObject.TYPE_STRING, GObject.TYPE_STRING)
-        self.tree = TreeViewControl()
+        self.tree = Gtk.TreeView()
         self.tree.set_model(model)
         self.tree.set_search_column(1)
-        self._signal_handlers[self.tree].append(
+        self.signals.append(
             self.tree.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
         self.tree.set_headers_visible(False)
         selection = self.tree.get_selection()
         selection.set_mode(Gtk.SelectionMode.MULTIPLE)
-        self._signal_handlers[selection].append(
-            selection.connect('changed', self._changed))
+        self.signals.append(selection.connect('changed', self._changed))
         widget.add(self.tree)
+        widget_class(widget, 'multiselection', True)
 
         self.selection = self.definition['selection']
+        width = 10
         if self.definition.get('sort', True):
             self.selection.sort(key=operator.itemgetter(1))
         for value, name in self.selection:
             name = str(name)
             model.append((value, name))
+            width = max(width, len(name))
 
+        widget.set_propagate_natural_width(True)
+        widget.set_propagate_natural_height(True)
         name_column = Gtk.TreeViewColumn()
         name_cell = Gtk.CellRendererText()
         name_column.pack_start(name_cell, expand=True)
@@ -225,6 +234,12 @@ class DictMultiSelectionEntry(DictEntry):
         self.tree.append_column(name_column)
 
         return widget
+
+    def disconnect_signals(self):
+        tree_handler, selection_handler = self.signals
+        self.tree.disconnect(tree_handler)
+        selection = self.tree.get_selection()
+        selection.disconnect(selection_handler)
 
     def get_value(self):
         model, paths = self.tree.get_selection().get_selected_rows()
@@ -236,7 +251,7 @@ class DictMultiSelectionEntry(DictEntry):
         selection.handler_block_by_func(self._changed)
         try:
             selection.unselect_all()
-            for v in value:
+            for v in value or []:
                 if v in value2path:
                     selection.select_path(value2path[v])
         finally:
@@ -256,14 +271,14 @@ class DictIntegerEntry(DictEntry):
 
     def create_widget(self):
         widget = NumberEntry()
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('key-press-event',
                 self.parent_widget.send_modified))
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
         widget.props.activates_default = True
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('activate', self.parent_widget.sig_activate))
         return widget
 
@@ -344,10 +359,10 @@ class DictDateTimeEntry(DictEntry):
             time_format = field.time_format(record)
             widget.props.date_format = date_format
             widget.props.time_format = time_format
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('key_press_event',
                 self.parent_widget.send_modified))
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
         return widget
@@ -379,10 +394,10 @@ class DictDateEntry(DictEntry):
         if record and field:
             format_ = field.date_format(record)
             widget.props.format = format_
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('key_press_event',
                 self.parent_widget.send_modified))
-        self._signal_handlers[widget].append(
+        self.signals.append(
             widget.connect('focus-out-event',
                 lambda w, e: self.parent_widget._focus_out()))
         return widget
@@ -400,7 +415,7 @@ class DictDateEntry(DictEntry):
 
 
 DICT_ENTRIES = {
-    'char': DictEntry,
+    'char': DictCharEntry,
     'boolean': DictBooleanEntry,
     'selection': DictSelectionEntry,
     'multiselection': DictMultiSelectionEntry,
@@ -422,10 +437,12 @@ class DictWidget(Widget):
         self.rows = {}
 
         self.widget = Gtk.Frame()
-        label = Gtk.Label(label=set_underline(attrs.get('string', '')))
-        label.set_use_underline(True)
-        self.widget.set_label_widget(label)
-        self.widget.set_shadow_type(Gtk.ShadowType.OUT)
+        # FEA#5633 Allow to not display label on group
+        if not attrs.get('no_label', 0):
+            label = Gtk.Label(label=set_underline(attrs.get('string', '')))
+            label.set_use_underline(True)
+            self.widget.set_label_widget(label)
+            self.widget.set_shadow_type(Gtk.ShadowType.OUT)
 
         vbox = Gtk.VBox()
         self.widget.add(vbox)
@@ -433,34 +450,41 @@ class DictWidget(Widget):
         self.grid = Gtk.Grid(column_spacing=3, row_spacing=3)
         vbox.pack_start(self.grid, expand=True, fill=True, padding=0)
 
-        hbox = Gtk.HBox()
-        hbox.set_border_width(2)
-        self.wid_text = Gtk.Entry()
-        self.wid_text.set_placeholder_text(_('Search'))
-        self.wid_text.props.width_chars = 13
-        self.wid_text.connect('activate', self._sig_activate)
-        hbox.pack_start(self.wid_text, expand=True, fill=True, padding=0)
-        label.set_mnemonic_widget(self.wid_text)
+        # JCA: specific
+        self.no_command = no_command = attrs.get('no_command', 0.0)
+        if not no_command:
+            hbox = Gtk.HBox()
+            hbox.set_border_width(2)
+            self.wid_text = Gtk.Entry()
+            self.wid_text.set_placeholder_text(_('Search'))
+            self.wid_text.props.width_chars = 13
+            self.wid_text.connect('activate', self._sig_activate)
+            hbox.pack_start(self.wid_text, expand=True, fill=True, padding=0)
+            label.set_mnemonic_widget(self.wid_text)
 
-        if int(self.attrs.get('completion', 1)):
-            self.wid_completion = get_completion(search=False, create=False)
-            self.wid_completion.connect('match-selected',
-                self._completion_match_selected)
-            self.wid_text.set_completion(self.wid_completion)
-            self.wid_text.connect('changed', self._update_completion)
+            if int(self.attrs.get('completion', 1)):
+                self.wid_completion = get_completion(search=False, create=False)
+                self.wid_completion.connect('match-selected',
+                    self._completion_match_selected)
+                self.wid_text.set_completion(self.wid_completion)
+                self.wid_text.connect('changed', self._update_completion)
+            else:
+                self.wid_completion = None
+
+            self.but_add = Gtk.Button(can_focus=False)
+            self.but_add.connect('clicked', self._sig_add)
+            self.but_add.add(
+                IconFactory.get_image('tryton-add', Gtk.IconSize.SMALL_TOOLBAR))
+            self.but_add.set_relief(Gtk.ReliefStyle.NONE)
+            hbox.pack_start(self.but_add, expand=False, fill=False, padding=0)
+            hbox.set_focus_chain([self.wid_text])
+            vbox.pack_start(hbox, expand=True, fill=True, padding=0)
         else:
-            self.wid_completion = None
-
-        self.but_add = Gtk.Button(can_focus=False)
-        self.but_add.connect('clicked', self._sig_add)
-        self.but_add.add(
-            IconFactory.get_image('tryton-add', Gtk.IconSize.SMALL_TOOLBAR))
-        self.but_add.set_relief(Gtk.ReliefStyle.NONE)
-        hbox.pack_start(self.but_add, expand=False, fill=False, padding=0)
-        vbox.pack_start(hbox, expand=True, fill=True, padding=0)
+            self.wid_text = None
 
         self.tooltips = Tooltips()
-        self.tooltips.set_tip(self.but_add, _('Add value'))
+        if not no_command:
+            self.tooltips.set_tip(self.but_add, _('Add value'))
         self.tooltips.enable()
 
         self._readonly = False
@@ -512,7 +536,8 @@ class DictWidget(Widget):
     def _sig_remove(self, button, key, modified=True):
         self.fields[key].disconnect_signals()
         del self.fields[key]
-        del self.buttons[key]
+        if not self.attrs.get('no_command', 0.0):
+            del self.buttons[key]
         for widget in self.rows[key]:
             self.grid.remove(widget)
             widget.destroy()
@@ -541,13 +566,15 @@ class DictWidget(Widget):
         self._set_button_sensitive()
         for widget in list(self.fields.values()):
             widget.set_readonly(readonly)
-        self.wid_text.set_sensitive(not readonly)
-        self.wid_text.set_editable(not readonly)
+        if not self.attrs.get('no_command', 0.0):
+            self.wid_text.set_sensitive(not readonly)
+            self.wid_text.set_editable(not readonly)
 
     def _set_button_sensitive(self):
-        self.but_add.set_sensitive(bool(
-                not self._readonly
-                and self.attrs.get('create', True)))
+        if not self.attrs.get('no_command', 0.0):
+            self.but_add.set_sensitive(bool(
+                    not self._readonly
+                    and int(self.attrs.get('create', 1))))
         for button in self.buttons.values():
             button.set_sensitive(bool(
                     not self._readonly
@@ -571,19 +598,21 @@ class DictWidget(Widget):
         self.grid.attach_next_to(
             hbox, label, Gtk.PositionType.RIGHT, 1, 1)
         hbox.show_all()
-        remove_but = self._new_remove_btn()
-        self.tooltips.set_tip(remove_but, _('Remove "%s"') %
-            key_schema['string'])
-        self.grid.attach_next_to(
-            remove_but, hbox, Gtk.PositionType.RIGHT, 1, 1)
-        remove_but.connect('clicked', self._sig_remove, key)
-        remove_but.show_all()
-        self.rows[key] = [label, hbox, remove_but]
-        self.buttons[key] = remove_but
+        self.rows[key] = [label, hbox]
+
+        if not self.attrs.get('no_command', 0.0):
+            remove_but = self._new_remove_btn()
+            self.tooltips.set_tip(remove_but, _('Remove "%s"') %
+                key_schema['string'])
+            self.grid.attach_next_to(
+                remove_but, hbox, Gtk.PositionType.RIGHT, 1, 1)
+            remove_but.connect('clicked', self._sig_remove, key)
+            remove_but.show_all()
+            self.buttons[key] = remove_but
+            self.rows[key].append(remove_but)
 
     def display(self):
         super(DictWidget, self).display()
-
         if not self.field:
             return
 

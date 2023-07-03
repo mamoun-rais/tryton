@@ -2,11 +2,11 @@
 # this repository contains the full copyright notices and license terms.
 import gettext
 
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk, Pango
 
+from tryton.common import COLORS
 import tryton.common as common
-from tryton.common import RPCExecute, RPCException
-from tryton.common import TRYTON_ICON
+from tryton.common import FORMAT_ERROR, TRYTON_ICON, RPCException, RPCExecute
 from tryton.common.underline import set_underline
 from tryton.common.widget_style import widget_class
 from tryton.gui import Main
@@ -59,6 +59,9 @@ class Widget(object):
     def _required_set(self, required):
         pass
 
+    def _color_widget(self):
+        return self.widget
+
     def _invisible_widget(self):
         return self.widget
 
@@ -79,7 +82,7 @@ class Widget(object):
             if not self.widget.props.window:
                 return
             if self.record and self.get_value() == value:
-                self.record.signal('record-modified')
+                self.view.screen.record_modified(display=False)
 
         def get_value():
             if not self.widget.props.window:
@@ -105,6 +108,49 @@ class Widget(object):
             return False
         self.set_value()
 
+    def _set_background(self, value):
+        widget = self._color_widget()
+        widget.modify_bg(Gtk.StateType.ACTIVE, Gdk.color_parse(value))
+
+    def _set_foreground(self, value):
+        widget = self._color_widget()
+        widget.modify_fg(Gtk.StateType.NORMAL, Gdk.color_parse(value))
+
+    def _set_font(self, value):
+        widget = self._color_widget()
+        widget.modify_font(Pango.FontDescription(value))
+
+    def _set_color(self, value):
+        widget = self._color_widget()
+        widget.modify_text(Gtk.StateType.NORMAL, Gdk.color_parse(value))
+        widget.modify_text(Gtk.StateType.INSENSITIVE, Gdk.color_parse(value))
+
+    def _format_set(self):
+        functions = {
+            'color': self._set_color,
+            'fg': self._set_foreground,
+            'bg': self._set_background,
+            'font': self._set_font
+            }
+        attrs = self.record.expr_eval(self.field.get_state_attrs(self.record).
+            get('states', {}))
+        states = self.record.expr_eval(self.attrs.get('states', {})).copy()
+        states.update(attrs)
+        for attr in list(states.keys()):
+            if not states[attr]:
+                continue
+            key = attr.split('_')
+            if key[0] == 'field':
+                key = key[1:]
+            if key[0] == 'label':
+                continue
+            if isinstance(states[attr], str):
+                key.append(states[attr])
+            if key[0] in functions:
+                if len(key) != 2:
+                    raise ValueError(FORMAT_ERROR + attr)
+                functions[key[0]](key[1])
+
     def display(self):
         if not self.field:
             self._readonly_set(self.attrs.get('readonly', True))
@@ -116,15 +162,23 @@ class Widget(object):
         if self.view.screen.readonly:
             readonly = True
         self._readonly_set(readonly)
+
+        # ABD: See #3428
+        self._format_set()
+
         widget_class(self.widget, 'readonly', readonly)
         self._required_set(not readonly and states.get('required', False))
         widget_class(
             self._required_widget, 'required',
             not readonly and states.get('required', False))
         invalid = states.get('invalid', False)
-        widget_class(self._invalid_widget, 'invalid', not readonly and invalid)
+        if self._invalid_widget:
+            widget_class(self._invalid_widget, 'invalid', not readonly and invalid)
         self.invisible_set(self.attrs.get(
                 'invisible', states.get('invisible', False)))
+
+    def get_value(self):
+        pass
 
     def set_value(self):
         pass
@@ -279,9 +333,7 @@ class TranslateMixin:
         button.connect('clicked', self.translate)
         return button
 
-    def translate(self, widget=None, *args):
-        if widget:
-            widget.grab_focus()
+    def translate(self, *args):
         self.view.set_value()
         if self.record.id < 0 or self.record.modified:
             common.message(

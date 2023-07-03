@@ -1,18 +1,19 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-from itertools import chain
 import gettext
+from itertools import chain
 
 from gi.repository import Gdk, Gtk, Pango
 
-from .infobar import InfoBar
 import tryton.common as common
-from tryton.common import TRYTON_ICON, MODELNAME
+from tryton.common import MODELNAME, TRYTON_ICON
 from tryton.common.domain_parser import quote
 from tryton.common.underline import set_underline
 from tryton.common.widget_style import widget_class
 from tryton.gui import Main
 from tryton.gui.window.nomodal import NoModal
+
+from .infobar import InfoBar
 
 _ = gettext.gettext
 
@@ -61,6 +62,7 @@ class WinForm(NoModal, InfoBar):
         self.win.set_deletable(False)
         self.win.connect('delete-event', lambda *a: True)
         self.win.connect('close', self.close)
+        self.win.connect('delete-event', self.delete_event)
         self.win.connect('response', self.response)
 
         self.win.set_default_size(*self.default_size())
@@ -74,6 +76,7 @@ class WinForm(NoModal, InfoBar):
         self.but_new = None
 
         self._initial_value = None
+        self.view_type = view_type
         if view_type == 'form':
             if new:
                 label, icon = _("Delete"), 'tryton-delete'
@@ -272,20 +275,13 @@ class WinForm(NoModal, InfoBar):
 
         scroll.add(self.screen.screen_container.alternate_viewport)
 
-        self.create_info_bar()
         self.win.vbox.pack_start(
-            self.info_bar, expand=False, fill=True, padding=0)
+            self.create_info_bar(), expand=False, fill=True, padding=0)
 
+        self.screen.windows.append(self)
         if view_type == 'tree':
-            self.screen.signal_connect(self, 'record-message', self._sig_label)
             self.screen.screen_container.alternate_viewport.connect(
                     'key-press-event', self.on_keypress)
-
-        if self.save_current and not new:
-            self.screen.signal_connect(self, 'record-message',
-                self.activate_save)
-            self.screen.signal_connect(self, 'record-modified',
-                self.activate_save)
 
         self.register()
         self.show()
@@ -349,22 +345,25 @@ class WinForm(NoModal, InfoBar):
         win.screen.search_filter(quote(value))
         win.show()
 
-    def _sig_label(self, screen, signal_data):
+    def record_message(self, position, size, *args):
+        self.activate_save()
+        if self.view_type != 'tree':
+            return
         name = '_'
-        access = common.MODELACCESS[screen.model_name]
+        access = common.MODELACCESS[self.screen.model_name]
         deletable = True
-        if screen.current_record:
-            deletable = screen.current_record.deletable
-        readonly = screen.group.readonly
-        if signal_data[0] >= 1:
-            name = str(signal_data[0])
+        if self.screen.current_record:
+            deletable = self.screen.current_record.deletable
+        readonly = self.screen.group.readonly
+        if position >= 1:
+            name = str(position)
             if self.domain is not None:
                 self.but_remove.set_sensitive(True)
-            if signal_data[0] < signal_data[1]:
+            if position < size:
                 self.but_next.set_sensitive(True)
             else:
                 self.but_next.set_sensitive(False)
-            if signal_data[0] > 1:
+            if position > 1:
                 self.but_pre.set_sensitive(True)
             else:
                 self.but_pre.set_sensitive(False)
@@ -378,10 +377,13 @@ class WinForm(NoModal, InfoBar):
             self.but_pre.set_sensitive(False)
             if self.domain is not None:
                 self.but_remove.set_sensitive(False)
-        line = '(%s/%s)' % (name, signal_data[1])
+        line = '(%s/%s)' % (name, position)
         self.label.set_text(line)
 
-    def activate_save(self, *args):
+    def record_modified(self, *args):
+        self.activate_save()
+
+    def activate_save(self):
         modified = self.screen.modified()
         # Keep sensible as change could have been trigger by a Many2One edition
         sensitive = modified or self.but_ok.props.sensitive
@@ -392,6 +394,10 @@ class WinForm(NoModal, InfoBar):
     def close(self, widget):
         widget.stop_emission_by_name('close')
         self.response(self.win, Gtk.ResponseType.CANCEL)
+        return True
+
+    def delete_event(self, widget, event):
+        widget.emit_stop_by_name('delete-event')
         return True
 
     def response(self, win, response_id):
@@ -420,12 +426,12 @@ class WinForm(NoModal, InfoBar):
                             if record:
                                 validate = record.pre_validate()
             if not validate:
-                self.message_info(self.screen.invalid_message(),
-                    Gtk.MessageType.ERROR)
+                self.info_bar_add(
+                    self.screen.invalid_message(), Gtk.MessageType.ERROR)
                 self.screen.set_cursor()
                 self.screen.display()
                 return
-            self.message_info()
+            self.info_bar_clear()
             if response_id == Gtk.ResponseType.ACCEPT:
                 self.new()
                 return
@@ -440,7 +446,7 @@ class WinForm(NoModal, InfoBar):
             elif record.modified:
                 record.cancel()
                 record.reload()
-                record.signal('record-changed')
+                record.set_modified()
             if added:
                 record.modified_fields.setdefault('id')
             result = False
@@ -460,12 +466,12 @@ class WinForm(NoModal, InfoBar):
             self.win.set_default_response(Gtk.ResponseType.OK)
 
     def destroy(self):
+        self.screen.windows.remove(self)
         self.screen.screen_container.alternate_view = False
         viewport = self.screen.screen_container.alternate_viewport
         if viewport and viewport.get_parent():
             viewport.get_parent().remove(viewport)
         self.screen.switch_view(view_type=self.prev_view.view_type)
-        self.screen.signal_unconnect(self)
         if getattr(self, 'win', None):
             self.win.destroy()
         NoModal.destroy(self)

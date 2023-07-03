@@ -2,16 +2,16 @@
 # this repository contains the full copyright notices and license terms.
 import gettext
 
-from gi.repository import Gtk, Gdk
+from gi.repository import Gdk, Gtk
 
-from tryton.common import RPCExecute, RPCException
-from tryton.common.common import selection
-from tryton.gui.window.view_form.screen import Screen
 from tryton.action import Action
+from tryton.common import RPCException, RPCExecute
+from tryton.common.common import selection
 from tryton.gui.window import Window
 from tryton.gui.window.attachment import Attachment
 from tryton.gui.window.email_ import Email
 from tryton.gui.window.note import Note
+from tryton.gui.window.view_form.screen import Screen
 
 _ = gettext.gettext
 
@@ -143,3 +143,20 @@ def populate(menu, model, record, title='', field=None, context=None):
         action_menu.append(email_item)
         email_item.connect('activate', email, toolbar)
     menu.show_all()
+
+
+def popup(menu, widget):
+    def menu_position(menu, x, y, user_data):
+        widget_allocation = widget.get_allocation()
+        x, y = widget.get_window().get_root_coords(
+            widget_allocation.x, widget_allocation.y)
+        return (x, y + widget_allocation.height, False)
+    menu.show_all()
+    if hasattr(menu, 'popup_at_widget'):
+        menu.popup_at_widget(
+            widget, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST,
+            Gtk.get_current_event())
+    else:
+        menu.popup(
+            None, None, menu_position, None, 0,
+            Gtk.get_current_event_time())

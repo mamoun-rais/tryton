@@ -7,14 +7,13 @@ import socket
 import threading
 import time
 import uuid
-from urllib.request import Request, urlopen
 from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from gi.repository import GLib
 
-from tryton.jsonrpc import object_hook
 from tryton.config import CONFIG
-
+from tryton.jsonrpc import object_hook
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +71,7 @@ def _listen(connection):
                     logger.info("Bus not supported")
                     break
             logger.error(
-                "An exception occured while connecting to the bus."
+                "An exception occurred while connecting to the bus. "
                 "Sleeping for %s seconds",
                 wait, exc_info=error)
             time.sleep(min(wait, bus_timeout))

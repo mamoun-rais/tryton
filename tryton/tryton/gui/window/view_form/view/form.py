@@ -1,41 +1,44 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import operator
 import gettext
+import operator
 
 from gi.repository import Gtk
 
-from . import View, XMLViewParser
-from tryton.common.focus import (get_invisible_ancestor, find_focused_child,
-    next_focus_widget, find_focusable_child, find_first_focus_widget)
-from tryton.common import Tooltips, node_attributes, IconFactory, get_align
-from tryton.common.underline import set_underline
+from tryton.common import IconFactory, Tooltips, get_align, node_attributes
 from tryton.common.button import Button
+from tryton.common.focus import (
+    find_first_focus_widget, find_focusable_child, find_focused_child,
+    get_invisible_ancestor, next_focus_widget)
+from tryton.common.underline import set_underline
 from tryton.config import CONFIG
-from .form_gtk.calendar_ import Date, Time, DateTime
+
+from . import View, XMLViewParser
+from .form_gtk.binary import Binary
+from .form_gtk.calendar_ import Date, DateTime, Time
+from .form_gtk.char import Char, Password
+from .form_gtk.checkbox import CheckBox
+from .form_gtk.dictionary import DictWidget
 from .form_gtk.document import Document
 from .form_gtk.float import Float
+from .form_gtk.image import Image as Image2
 from .form_gtk.integer import Integer
-from .form_gtk.selection import Selection
-from .form_gtk.char import Char, Password
-from .form_gtk.timedelta import TimeDelta
-from .form_gtk.checkbox import CheckBox
-from .form_gtk.reference import Reference
-from .form_gtk.binary import Binary
-from .form_gtk.textbox import TextBox
-from .form_gtk.one2many import One2Many
 from .form_gtk.many2many import Many2Many
 from .form_gtk.many2one import Many2One
-from .form_gtk.url import Email, URL, CallTo, SIP, HTML
-from .form_gtk.image import Image as Image2
-from .form_gtk.progressbar import ProgressBar
-from .form_gtk.one2one import One2One
-from .form_gtk.richtextbox import RichTextBox
-from .form_gtk.dictionary import DictWidget
 from .form_gtk.multiselection import MultiSelection
+from .form_gtk.one2many import One2Many
+from .form_gtk.one2one import One2One
+from .form_gtk.progressbar import ProgressBar
 from .form_gtk.pyson import PYSON
-from .form_gtk.state_widget import (Label, VBox, Image, Frame, ScrolledWindow,
-    Notebook, Expander, Link)
+from .form_gtk.reference import Reference
+from .form_gtk.richtextbox import RichTextBox
+from .form_gtk.selection import Selection
+from .form_gtk.state_widget import (
+    Expander, Frame, Image, Label, Link, Notebook, ScrolledWindow, VBox)
+from .form_gtk.sourceeditor import SourceView
+from .form_gtk.textbox import TextBox
+from .form_gtk.timedelta import TimeDelta
+from .form_gtk.url import HTML, SIP, URL, CallTo, Email
 
 _ = gettext.gettext
 
@@ -186,6 +189,7 @@ class FormXMLViewParser(XMLViewParser):
         'reference': Reference,
         'richtext': RichTextBox,
         'selection': Selection,
+        'source': SourceView,  # Coopengo specific
         'sip': SIP,
         'text': TextBox,
         'time': Time,
@@ -228,8 +232,14 @@ class FormXMLViewParser(XMLViewParser):
             self.container.add(None, attributes)
             return
 
+        # RSE Display more useful info when trying to display unexisting field
+        if 'widget' not in attributes:
+            raise Exception('Unknown field %s' % attributes['name'])
         widget = self.WIDGETS[attributes['widget']](self.view, attributes)
         self.view.widgets[name].append(widget)
+
+        if attributes.get('group'):
+            group = attributes['group']
 
         if widget.expand:
             attributes.setdefault('yexpand', True)
@@ -440,6 +450,7 @@ class ViewForm(View):
     def __init__(self, view_id, screen, xml):
         self.notebooks = []
         self.expandables = []
+        self.widget_groups = {}
 
         vbox = Gtk.VBox()
         vp = Gtk.Viewport()
@@ -458,6 +469,8 @@ class ViewForm(View):
         self.viewport = vp
 
         super().__init__(view_id, screen, xml)
+
+        self.creatable = bool(int(self.attributes.get('creatable', 1)))
 
     def get_fields(self):
         return list(self.widgets.keys())
@@ -507,18 +520,15 @@ class ViewForm(View):
                         field.get_state_attrs(record)['invalid'] = False
                         widget.display()
 
-    def display(self):
+    def display(self, force=False):
         record = self.record
         if record:
             # Force to set fields in record
             # Get first the lazy one from the view to reduce number of requests
-            field_names = set()
-            for name in self.widgets:
-                field = record.group.fields[name]
-                field_names.add(name)
-                field_names.update(f for f in field.attrs.get('depends', [])
-                    if (not f.startswith('_parent')
-                        and f in record.group.fields))
+            field_names = set(self.get_fields())
+            for name, field in record.group.fields.items():
+                if self.view_id in field.views:
+                    field_names.add(name)
             fields = []
             for name in field_names:
                 field = record.group.fields[name]

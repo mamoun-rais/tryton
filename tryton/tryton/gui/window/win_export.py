@@ -1,12 +1,13 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import base64
 import csv
 import datetime
-import os
-import tempfile
 import gettext
 import json
 import locale
+import os
+import tempfile
 import urllib.parse
 from itertools import zip_longest
 from numbers import Number
@@ -14,11 +15,11 @@ from numbers import Number
 from gi.repository import Gdk, GObject, Gtk
 
 import tryton.common as common
+from tryton.common import RPCException, RPCExecute
 from tryton.config import CONFIG
-from tryton.common import RPCExecute, RPCException
 from tryton.gui.window.win_csv import WinCSV
 from tryton.jsonrpc import JSONEncoder
-from tryton.rpc import clear_cache, CONNECTION
+from tryton.rpc import CONNECTION, clear_cache
 
 _ = gettext.gettext
 
@@ -374,19 +375,21 @@ class WinExport(WinCSV):
             else:
                 fileno, fname = tempfile.mkstemp(
                     '.csv', common.slugify(self.name) + '_')
-                self.export_csv(fname, fields2, data, paths, popup=False)
-                os.close(fileno)
-                common.file_open(fname, 'csv')
+                if self.export_csv(fname, fields2, data, paths, popup=False):
+                    os.close(fileno)
+                    common.file_open(fname, 'csv')
+                else:
+                    os.close(fileno)
         self.destroy()
 
     def export_csv(self, fname, fields, data, paths, popup=True):
-        encoding = self.csv_enc.get_active_text() or 'UTF-8'
+        encoding = self.csv_enc.get_active_text() or 'utf_8_sig'
         locale_format = self.csv_locale.get_active()
 
         try:
+            file_obj = open(fname, 'w', encoding=encoding, newline='')
             writer = csv.writer(
-                open(fname, 'w', encoding=encoding, newline=''),
-                quotechar=self.get_quotechar(),
+                file_obj, quotechar=self.get_quotechar(),
                 delimiter=self.get_delimiter())
             if self.add_field_names.get_active():
                 writer.writerow(fields)
@@ -401,9 +404,8 @@ class WinExport(WinCSV):
                 else:
                     common.message(_('%d records saved.') % len(data))
             return True
-        except IOError as exception:
-            common.warning(_("Operation failed.\nError message:\n%s")
-                % exception, _('Error'))
+        except (IOError, UnicodeEncodeError, csv.Error) as exception:
+            common.warning(str(exception), _('Export failed'))
             return False
 
     @classmethod
@@ -426,6 +428,8 @@ class WinExport(WinCSV):
                 val = int(val)
             if i == 0 and indent and isinstance(val, str):
                 val = '  ' * indent + val
+            if isinstance(val, bytes):
+                val = base64.b64encode(val).decode('utf-8')
             row.append(val)
         return row
 
@@ -468,8 +472,7 @@ class WinExport(WinCSV):
         else:
             domain = self.screen.search_domain(
                 self.screen.screen_container.get_text())
-            if (not self.ignore_search_limit.get_active()
-                    and self.screen.limit is not None):
+            if not self.ignore_search_limit.get_active():
                 query_string.append(('s', str(self.screen.limit)))
                 query_string.append(
                     ('p', str(self.screen.offset // self.screen.limit)))

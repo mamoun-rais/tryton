@@ -1,8 +1,9 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-from gi.repository import GObject, Gio, Gtk
+from gi.repository import Gio, GObject, Gtk
 
 from tryton.common import common
+
 from . import View
 from .form import ViewForm
 
@@ -23,8 +24,11 @@ class ListBoxViewForm(ViewForm):
         self._record = value
 
     def button_clicked(self, widget):
-        if self.screen.selected_records == [self.record]:
-            super().button_clicked(widget)
+        if (self.record != self.screen.current_record
+                or len(self.listform.selected_records) != 1):
+            self.listform.select_form(self)
+            return
+        super().button_clicked(widget)
 
 
 class ListBoxItem(GObject.Object):
@@ -62,6 +66,7 @@ class ViewListForm(View):
 
     def __init__(self, view_id, screen, xml):
         super().__init__(view_id, screen, xml)
+        self.creatable = bool(int(self.attributes.get('creatable', 1)))
         self.view_type = 'list-form'
 
         self.form_xml = xml
@@ -74,7 +79,7 @@ class ViewListForm(View):
         self._model = None
         self._view_forms = []
 
-    def display(self):
+    def display(self, force=False):
         if self._model is None or self._model.group is not self.group:
             self._view_forms = []
             self._model = ListBoxModel(self.group)
@@ -85,6 +90,7 @@ class ViewListForm(View):
     def _create_form(self, item):
         view_form = ListBoxViewForm(self.view_id, self.screen, self.form_xml)
         view_form.record = item.record
+        view_form.listform = self
         view_form.widget.props.margin = 3
         self._view_forms.append(view_form)
         frame = Gtk.Frame.new()
@@ -117,14 +123,28 @@ class ViewListForm(View):
         return [
             self._model.get_item(r.get_index()).record for r in selected_rows]
 
-    def group_list_changed(self, group, signal):
-        action = signal[0]
+    def select_form(self, listbox_form):
+        index = self._view_forms.index(listbox_form)
+        self.listbox.unselect_all()
+        row = self.listbox.get_row_at_index(index)
+        if not row or not row.get_realized():
+            return
+        self.listbox.select_row(row)
+
+    def group_list_changed(self, group, action, *args):
+        # Only those actions have a record in the signal data
+        if action not in {'record-added', 'record-removed'}:
+            return
         if action == 'record-added':
-            position = signal[2]
+            record, position = args
+            if group != record.group:
+                return
             self._model.emit('items-changed', position, 0, 1)
             self._view_forms.insert(position, self._view_forms.pop())
         elif action == 'record-removed':
-            position = signal[2]
+            record, position = args
+            if group != record.group:
+                return
             self._model.emit('items-changed', position, 1, 0)
             self._view_forms.pop(position)
 

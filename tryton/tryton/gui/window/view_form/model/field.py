@@ -1,24 +1,23 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
-import os
-from itertools import chain
-import tempfile
-import logging
-import locale
-from tryton.common import \
-        domain_inversion, eval_domain, localize_domain, \
-        merge, inverse_leaf, filter_leaf, prepare_reference_domain, \
-        extract_reference_models, concat, simplify, unique_value, \
-        EvalEnvironment
-import tryton.common as common
 import datetime
 import decimal
-from decimal import Decimal
+import locale
+import logging
 import math
-from tryton.common import RPCExecute, RPCException
+import os
+import tempfile
+from decimal import Decimal
+from itertools import chain
+
+import tryton.common as common
+from tryton.common import (
+    EvalEnvironment, RPCException, RPCExecute, concat, domain_inversion,
+    eval_domain, extract_reference_models, filter_leaf, inverse_leaf,
+    localize_domain, merge, prepare_reference_domain, simplify, unique_value)
 from tryton.common.htmltextbuffer import guess_decode
-from tryton.pyson import PYSONDecoder
 from tryton.config import CONFIG
+from tryton.pyson import PYSONDecoder
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +89,10 @@ class Field(object):
         if bool(int(state_attrs.get('required') or 0)):
             if (self._is_empty(record)
                     and not bool(int(state_attrs.get('readonly') or 0))):
+                logging.getLogger('root').debug('Field %s required on %s : '
+                    'states : %s'
+                    % (self.name, record.model_name,
+                        str(self.attrs.get('states', {}))))
                 return False
         return True
 
@@ -102,10 +105,16 @@ class Field(object):
         if not softvalidation:
             if not self.check_required(record):
                 invalid = 'required'
+                logging.getLogger('root').debug('Field %s of %s is required' %
+                    (self.name, record.model_name))
         if isinstance(domain, bool):
             if not domain:
+                logging.getLogger('root').debug('Invalid domain on Field %s of'
+                    ' %s : %s' % (self.name, record.model_name, str(domain)))
                 invalid = 'domain'
         elif domain == [('id', '=', None)]:
+            logging.getLogger('root').debug('Invalid domain on Field %s of'
+                ' %s : %s' % (self.name, record.model_name, str(domain)))
             invalid = 'domain'
         else:
             unique, leftpart, value = unique_value(domain)
@@ -118,8 +127,9 @@ class Field(object):
                     # XXX to remove once server domains are fixed
                     value = None
                 setdefault = True
-                if record.group.domain:
-                    original_domain = merge(record.group.domain)
+                group_domain = record.group.get_domain()
+                if group_domain:
+                    original_domain = merge(group_domain)
                 else:
                     original_domain = merge(domain)
                 domain_readonly = original_domain[0] == 'AND'
@@ -137,6 +147,8 @@ class Field(object):
                         domain_readonly)
             if not eval_domain(domain, EvalEnvironment(record)):
                 invalid = domain
+                logging.getLogger('root').debug('Invalid domain on Field %s of'
+                    ' %s : %s' % (self.name, record.model_name, str(domain)))
         self.get_state_attrs(record)['invalid'] = invalid
         return not invalid
 
@@ -156,15 +168,13 @@ class Field(object):
         previous_value = self.get(record)
         self.set(record, value)
         if previous_value != self.get(record):
-            record.modified_fields.setdefault(self.name)
-            record.signal('record-modified')
             self.sig_changed(record)
             record.validate(softvalidation=True)
-            record.signal('record-changed')
+            record.set_modified(self.name)
         elif force_change:
             self.sig_changed(record)
             record.validate(softvalidation=True)
-            record.signal('record-changed')
+            record.set_modified()
 
     def get_client(self, record):
         return self.get(record)
@@ -187,7 +197,8 @@ class Field(object):
             elif key in self.attrs:
                 self.get_state_attrs(record)[key] = self.attrs[key]
         if (record.group.readonly
-                or self.get_state_attrs(record).get('domain_readonly')):
+                or self.get_state_attrs(record).get('domain_readonly')
+                or record.parent_name == self.name):
             self.get_state_attrs(record)['readonly'] = True
 
     def get_state_attrs(self, record):
@@ -203,6 +214,11 @@ class Field(object):
 
 class CharField(Field):
     _default = ''
+
+    def set(self, record, value):
+        super().set(
+            record, value.strip()
+            if value and self.attrs.get('strip') else value)
 
     def get(self, record):
         return super(CharField, self).get(record) or self._default
@@ -243,10 +259,6 @@ class MultiSelectionField(Field):
         return value
 
     def set_client(self, record, value, force_change=False):
-        if value is None:
-            value = []
-        if isinstance(value, str):
-            value = [value]
         if value:
             value = sorted(value)
         super().set_client(record, value, force_change=force_change)
@@ -354,6 +366,23 @@ class FloatField(Field):
 
     def digits(self, record, factor=1):
         digits = record.expr_eval(self.attrs.get('digits'))
+        if isinstance(digits, str):
+            if digits not in record.group.fields:
+                return
+            digits_field = record.group.fields[digits]
+            digits_name = digits_field.attrs.get('relation')
+            digits_id = digits_field.get(record)
+            if digits_name and digits_id is not None and digits_id >= 0:
+                try:
+                    digits = RPCExecute(
+                        'model', digits_name, 'get_digits', digits_id)
+                except RPCException:
+                    logger.warn(
+                        "Fail to fetch digits for %s,%s",
+                        digits_name, digits_id)
+                    return
+            else:
+                return
         if not digits or any(d is None for d in digits):
             return
         shift = int(round(math.log(abs(factor), 10)))
@@ -383,7 +412,8 @@ class FloatField(Field):
 
     def convert(self, value):
         try:
-            return locale.atof(value)
+            return float(locale.delocalize(
+                    value, self.attrs.get('monetary', False)))
         except ValueError:
             return self._default
 
@@ -399,7 +429,7 @@ class FloatField(Field):
         super(FloatField, self).set_client(record, value,
             force_change=force_change)
 
-    def get_client(self, record, factor=1):
+    def get_client(self, record, factor=1, grouping=True):
         value = record.value.get(self.name)
         if value is not None:
             digits = self.digits(record, factor=factor)
@@ -408,9 +438,13 @@ class FloatField(Field):
                 d = Decimal(repr(d))
             if digits:
                 p = int(digits[1])
+            elif d == d.to_integral_value():
+                p = 0
             else:
                 p = -int(d.as_tuple().exponent)
-            return locale.localize('{0:.{1}f}'.format(d, p), True)
+            monetary = self.attrs.get('monetary', False)
+            return locale.localize(
+                '{0:.{1}f}'.format(d, p), grouping, monetary)
         else:
             return ''
 
@@ -419,7 +453,8 @@ class NumericField(FloatField):
 
     def convert(self, value):
         try:
-            return Decimal(locale.delocalize(value))
+            return Decimal(locale.delocalize(
+                    value, self.attrs.get('monetary', False)))
         except decimal.InvalidOperation:
             return self._default
 
@@ -427,16 +462,17 @@ class NumericField(FloatField):
         return super(NumericField, self).set_client(record, value,
             force_change=force_change, factor=Decimal(str(factor)))
 
-    def get_client(self, record, factor=1):
+    def get_client(self, record, factor=1, grouping=True):
         return super(NumericField, self).get_client(record,
-            factor=Decimal(str(factor)))
+            factor=Decimal(str(factor)), grouping=grouping)
 
 
 class IntegerField(FloatField):
 
     def convert(self, value):
         try:
-            return locale.atoi(value)
+            return int(locale.delocalize(
+                    value, self.attrs.get('monetary', False)))
         except ValueError:
             return self._default
 
@@ -444,8 +480,9 @@ class IntegerField(FloatField):
         return super(IntegerField, self).set_client(record, value,
             force_change=force_change, factor=int(factor))
 
-    def get_client(self, record, factor=1):
-        return super(IntegerField, self).get_client(record, factor=int(factor))
+    def get_client(self, record, factor=1, grouping=True):
+        return super(IntegerField, self).get_client(
+            record, factor=int(factor), grouping=grouping)
 
 
 class BooleanField(Field):
@@ -544,29 +581,6 @@ class O2MField(Field):
     def __init__(self, attrs):
         super(O2MField, self).__init__(attrs)
 
-    def _group_changed(self, group, record):
-        if not record.parent:
-            return
-        # Store parent as it could be removed by validation
-        parent = record.parent
-        parent.modified_fields.setdefault(self.name)
-        self.sig_changed(parent)
-        parent.validate(softvalidation=True)
-        parent.signal('record-changed')
-
-    def _group_list_changed(self, group, signal):
-        if group.model_name == group.parent.model_name:
-            group.parent.group.signal('group-list-changed', signal)
-
-    def _group_cleared(self, group, signal):
-        if group.model_name == group.parent.model_name:
-            group.parent.signal('group-cleared')
-
-    def _record_modified(self, group, record):
-        if not record.parent:
-            return
-        record.parent.signal('record-modified')
-
     def _set_default_value(self, record, fields=None):
         if record.value.get(self.name) is not None:
             return
@@ -583,14 +597,6 @@ class O2MField(Field):
         if not fields and record.model_name == self.attrs['relation']:
             group.fields = record.group.fields
         record.value[self.name] = group
-        self._connect_value(group)
-
-    def _connect_value(self, group):
-        group.signal_connect(group, 'group-changed', self._group_changed)
-        group.signal_connect(group, 'group-list-changed',
-            self._group_list_changed)
-        group.signal_connect(group, 'group-cleared', self._group_cleared)
-        group.signal_connect(group, 'record-modified', self._record_modified)
 
     def get_client(self, record):
         self._set_default_value(record)
@@ -687,26 +693,21 @@ class O2MField(Field):
         if mode == 'list ids':
             records_to_remove = [r for r in group if r.id not in value]
             for record_to_remove in records_to_remove:
-                group.remove(record_to_remove, remove=True, signal=False)
+                group.remove(record_to_remove, remove=True, modified=False)
             group.load(value, modified=modified or default)
         else:
             for vals in value:
-                if 'id' in vals:
-                    new_record = group.get(vals['id'])
-                    if not new_record:
-                        new_record = group.new(
-                            default=False, obj_id=vals['id'])
-                else:
-                    new_record = group.new(default=False)
+                new_record = record.value[self.name].new(default=False)
                 if default:
                     # Don't validate as parent will validate
-                    new_record.set_default(vals, signal=False, validate=False)
-                    group.add(new_record, signal=False)
+                    new_record.set_default(
+                        vals, modified=False, validate=False)
+                    group.add(new_record, modified=False)
                 else:
-                    new_record.set(vals, signal=False)
+                    new_record.set(vals, modified=False)
                     group.append(new_record)
-            # Trigger signal only once with the last record
-            new_record.signal('record-changed')
+            # Trigger modified only once
+            group.record_modified()
 
     def set(self, record, value, _default=False):
         group = record.value.get(self.name)
@@ -714,7 +715,7 @@ class O2MField(Field):
         if group is not None:
             fields = group.fields.copy()
             # Unconnect to prevent infinite loop
-            group.signal_unconnect(group)
+            group.parent = None
             group.destroy()
         elif record.model_name == self.attrs['relation']:
             fields = record.group.fields
@@ -726,9 +727,10 @@ class O2MField(Field):
         self._set_default_value(record, fields=fields)
         group = record.value[self.name]
 
-        group.signal_unconnect(group)
+        # Prevent to trigger group-cleared
+        group.parent = None
         self._set_value(record, value, default=_default)
-        self._connect_value(group)
+        group.parent = record
 
     def set_client(self, record, value, force_change=False):
         # domain inversion could try to set None as value
@@ -743,21 +745,20 @@ class O2MField(Field):
         modified = set(previous_ids) != set(value)
         self._set_value(record, value, modified=modified)
         if modified:
-            record.modified_fields.setdefault(self.name)
-            record.signal('record-modified')
             self.sig_changed(record)
             record.validate(softvalidation=True)
-            record.signal('record-changed')
+            record.set_modified(self.name)
         elif force_change:
             self.sig_changed(record)
             record.validate(softvalidation=True)
-            record.signal('record-changed')
+            record.set_modified()
 
     def set_default(self, record, value):
         self.set(record, value, _default=True)
         record.modified_fields.setdefault(self.name)
 
     def set_on_change(self, record, value):
+        record[self.name]
         record.modified_fields.setdefault(self.name)
         self._set_default_value(record)
         if isinstance(value, (list, tuple)):
@@ -786,14 +787,14 @@ class O2MField(Field):
                 record2 = group.get(record_id)
                 if record2 is not None:
                     group.remove(
-                        record2, remove=False, signal=False,
+                        record2, remove=False, modified=False,
                         force_remove=False)
         if value and value.get('remove'):
             for record_id in value['remove']:
                 record2 = group.get(record_id)
                 if record2 is not None:
                     group.remove(
-                        record2, remove=True, signal=False,
+                        record2, remove=True, modified=False,
                         force_remove=False)
 
         if value and (value.get('add') or value.get('update', [])):
@@ -816,7 +817,7 @@ class O2MField(Field):
                     new_record = group.get(id_)
                 if not new_record:
                     new_record = group.new(obj_id=id_, default=False)
-                group.add(new_record, index, signal=False)
+                group.add(new_record, index, modified=False)
                 new_record.set_on_change(vals)
 
             for vals in value.get('update', []):
@@ -983,6 +984,16 @@ class ReferenceField(Field):
         return concat(localize_domain(
                 screen_domain, self.name, strip_target=True), attr_domain)
 
+    def get_search_order(self, record):
+        order = super().get_search_order(record)
+        if order is not None:
+            if record.value.get(self.name):
+                model = record.value[self.name][0]
+            else:
+                model = None
+            order = order.get(model)
+        return order
+
     def get_models(self, record):
         screen_domain, attr_domain = self.domains_get(record)
         screen_domain = prepare_reference_domain(screen_domain, self.name)
@@ -1026,11 +1037,9 @@ class BinaryField(Field):
         with open(filename, 'wb') as fp:
             fp.write(data)
         self.set(record, _FileCache(filename))
-        record.modified_fields.setdefault(self.name)
-        record.signal('record-modified')
         self.sig_changed(record)
         record.validate(softvalidation=True)
-        record.signal('record-changed')
+        record.set_modified(self.name)
 
     def get_size(self, record):
         result = record.value.get(self.name) or 0
@@ -1098,16 +1107,9 @@ class DictField(Field):
         for i in range(0, len(keys), batchlen):
             sub_keys = keys[i:i + batchlen]
             try:
-                key_ids = RPCExecute('model', schema_model, 'search',
-                    [('name', 'in', sub_keys), domain], 0,
-                    CONFIG['client.limit'], None, context=context)
-            except RPCException:
-                key_ids = []
-            if not key_ids:
-                continue
-            try:
-                values = RPCExecute('model', schema_model,
-                    'get_keys', key_ids, context=context)
+                values = RPCExecute('model', schema_model, 'search_get_keys',
+                    [('name', 'in', sub_keys), domain], CONFIG['client.limit'],
+                    context=context)
             except RPCException:
                 values = []
             if not values:
@@ -1119,7 +1121,7 @@ class DictField(Field):
         context = self.get_context(record)
         try:
             new_fields = RPCExecute('model', schema_model,
-                'get_keys', key_ids, context=context)
+                'search_get_keys', [('id', 'in', key_ids)], context=context)
         except RPCException:
             new_fields = []
 

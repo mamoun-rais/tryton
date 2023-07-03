@@ -2,14 +2,14 @@
 # this repository contains the full copyright notices and license terms.
 import gettext
 import os
-from urllib.request import urlopen
-from urllib.parse import urlparse, unquote
+from urllib.parse import unquote, urlparse
 
 from gi.repository import Gdk, Gtk
 
-from tryton.common import common
-from tryton.common import file_selection, Tooltips, file_open, file_write
+from tryton.common import (
+    Tooltips, common, file_open, file_selection, file_write, url_open)
 from tryton.common.entry_position import reset_position
+
 from .widget import Widget
 
 _ = gettext.gettext
@@ -91,7 +91,7 @@ class BinaryMixin(Widget):
         filename = file_selection(
             _('Select'), preview=self.preview, filters=self.filters)
         if filename:
-            self._set_uri('file:///' + filename)
+            self._set_uri(filename.as_uri())
 
     def select_drag_data_received(
             self, widget, context, x, y, selection, info, timestamp):
@@ -102,7 +102,7 @@ class BinaryMixin(Widget):
 
     def _set_uri(self, uri):
         uri = unquote(uri)
-        self.field.set_client(self.record, urlopen(uri).read())
+        self.field.set_client(self.record, url_open(uri).read())
         if self.filename_field:
             self.filename_field.set_client(self.record,
                 os.path.basename(urlparse(uri).path))
@@ -193,7 +193,6 @@ class Binary(BinaryMixin, Widget):
         return False
 
     def sig_icon_press(self, widget, icon_pos, event):
-        widget.grab_focus()
         if icon_pos == Gtk.EntryIconPosition.PRIMARY:
             self.open_()
 
@@ -209,7 +208,7 @@ class Binary(BinaryMixin, Widget):
             size = self.field.get_size(self.record)
         else:
             size = len(self.field.get(self.record))
-        self.wid_size.set_text(common.humanize(size or 0))
+        self.wid_size.set_text(common.humanize(size or 0, 'B'))
         reset_position(self.wid_size)
         if self.wid_text:
             self.wid_text.set_text(self.filename_field.get(self.record) or '')
@@ -234,3 +233,9 @@ class Binary(BinaryMixin, Widget):
             self.filename_field.set_client(self.record,
                     self.wid_text.get_text() or False)
         return
+
+    def _color_widget(self):
+        if self.wid_text:
+            return self.wid_text
+        else:
+            return self.wid_size
