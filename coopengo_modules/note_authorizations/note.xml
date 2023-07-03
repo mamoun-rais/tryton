@@ -1,0 +1,81 @@
+<?xml version="1.0"?>
+<!-- This file is part of Coog. The COPYRIGHT file at the top level of
+this repository contains the full copyright notices and license terms. -->
+<tryton>
+    <data>
+        <!-- ############# -->
+        <!-- # Note Type # -->
+        <!-- ############# -->
+        <record model="ir.ui.view" id="note_type_view_form">
+            <field name="model">ir.note.type</field>
+            <field name="type">form</field>
+            <field name="name">note_type_form</field>
+        </record>
+        <record model="ir.ui.view" id="note_type_view_list">
+            <field name="model">ir.note.type</field>
+            <field name="type">tree</field>
+            <field name="name">note_type_list</field>
+        </record>
+        <!-- Menu -->
+        <record model="ir.action.act_window" id="act_note_type">
+            <field name="name">Note Type</field>
+            <field name="res_model">ir.note.type</field>
+        </record>
+        <record model="ir.action.act_window.view" id="act_note_type_view1">
+            <field name="sequence" eval="10"/>
+            <field name="view" ref="note_type_view_list"/>
+            <field name="act_window" ref="act_note_type"/>
+        </record>
+        <record model="ir.action.act_window.view" id="act_note_type_view2">
+            <field name="sequence" eval="20"/>
+            <field name="view" ref="note_type_view_form"/>
+            <field name="act_window" ref="act_note_type"/>
+        </record>
+        <menuitem parent="ir.menu_administration" sequence="30" action="act_note_type" id="menu_note_type"/>
+        <!-- Access Rights -->
+        <record model="ir.model.access" id="access_ir_note_type">
+            <field name="model" search="[('model', '=', 'ir.note.type')]"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_delete" eval="False"/>
+        </record>
+        <record model="ir.model.access" id="access_ir_note_type_admin">
+            <field name="model" search="[('model', '=', 'ir.note.type')]"/>
+            <field name="group" ref="res.group_admin"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_delete" eval="True"/>
+        </record>
+        <!-- ####################### -->
+        <!-- # Read rule for notes # -->
+        <!-- ####################### -->
+        <record model="ir.rule.group" id="rule_group_note">
+            <field name="name">Own note or no type</field>
+            <field name="model" search="[('model', '=', 'ir.note')]"/>
+            <field name="global_p" eval="True"/>
+            <field name="perm_read" eval="True"/>
+            <field name="perm_create" eval="True"/>
+            <field name="perm_write" eval="True"/>
+            <field name="perm_delete" eval="False"/>
+        </record>
+        <record model="ir.rule" id="rule_note">
+            <field name="domain" eval="['OR', ('type_', 'in', ['', None]), ('groups', 'in', Eval('user', {}).get('groups', []))]" pyson="1"/>
+            <field name="rule_group" ref="rule_group_note"/>
+        </record>
+        <!-- ######## -->
+        <!-- # Note # -->
+        <!-- ######## -->
+        <record model="ir.ui.view" id="note_view_form">
+            <field name="model">ir.note</field>
+            <field name="inherit" ref="ir.note_view_form"/>
+            <field name="name">note_form</field>
+        </record>
+        <record model="ir.ui.view" id="note_view_list">
+            <field name="model">ir.note</field>
+            <field name="inherit" ref="ir.note_view_list"/>
+            <field name="name">note_list</field>
+        </record>
+    </data>
+</tryton>
