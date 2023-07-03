@@ -37,57 +37,83 @@ class CAMT054(SEPAHandler):
     def handle_entry(self, element):
         tag = etree.QName(element)
         failed, succeeded = [], []
+        ntry_detail = element.find('./{%s}NtryDtls' % tag.namespace)
+        if ntry_detail is None:
+            # Version 1 doesn't have NtryDtls but directly TxDtls
+            details_path = './{%s}TxDtls' % tag.namespace
+        else:
+            details_path = './{%s}NtryDtls' % tag.namespace
+        cdtdbtind_path = './/{%s}CdtDbtInd' % tag.namespace
+
+        payment_kind = self.get_payment_kind(element)
         date_value = self.date_value(element)
 
-        for transaction in element.findall('.//{%s}TxDtls' % tag.namespace):
-            payments = self.get_payments(transaction)
-            if self.is_returned(transaction):
-                for payment in payments:
-                    self.set_return_information(payment, transaction)
-                failed.extend(payments)
+        for detail in element.findall(details_path):
+            if ntry_detail is None:
+                transactions = [detail]
             else:
-                succeeded.extend(payments)
+                transactions = detail.findall('./{%s}TxDtls' % tag.namespace)
+
+            if detail.find(cdtdbtind_path) is not None:
+                # Versions >=3 store the CdtDbtInd in the batch or the
+                # transactions
+                payment_kind = self.get_payment_kind(detail)
+
+            for transaction in transactions:
+                if transaction.find(cdtdbtind_path) is not None:
+                    payment_kind = self.get_payment_kind(transaction)
+                payments = self.get_payments(transaction, payment_kind)
+                if self.is_returned(transaction):
+                    for payment in payments:
+                        self.set_return_information(payment, transaction)
+                    failed.extend(payments)
+                else:
+                    succeeded.extend(payments)
 
         if failed:
             self.Payment.save(failed)
             self.Payment.fail(failed)
         if succeeded:
             with Transaction().set_context(date_value=date_value):
-                self.Payment.succeed(succeeded)
+                self.Payment.succeed(payments)
 
     def get_payment_kind(self, element):
-        camt_ns = etree.QName(element).namespace
-        for path in [
-                './camt:CdtDbtInd',
-                './ancestor::camt:NtryDtls/camt:Btch/camt:CdtDbtInd',
-                './ancestor::camt:Ntry/camt:CdtDbtInd',
-                ]:
-            cdtdbtind = element.xpath(path, namespaces={'camt': camt_ns})
-            if cdtdbtind:
-                return self._kinds[cdtdbtind[0].text]
+        tag = etree.QName(element)
+        return self._kinds[
+            element.find('.//{%s}CdtDbtInd' % tag.namespace).text]
     _kinds = {
         'CRDT': 'payable',
         'DBIT': 'receivable',
         }
 
-    def get_payments(self, transaction):
-        tag = etree.QName(transaction)
-        instr_id = transaction.find(
-            './/{%s}InstrId' % tag.namespace)
-        end_to_end_id = transaction.find(
-            './/{%s}EndToEndId' % tag.namespace)
-        payment_kind = self.get_payment_kind(transaction)
-        if instr_id is not None:
-            return self.Payment.search([
-                    ('sepa_instruction_id', '=', instr_id.text),
-                    ('kind', '=', payment_kind),
-                    ])
-        elif end_to_end_id is not None:
-            return self.Payment.search([
-                    ('sepa_end_to_end_id', '=', end_to_end_id.text),
-                    ('kind', '=', payment_kind),
-                    ])
-        return []
+    def get_payments(self, transactions, payment_kind):
+        payments = []
+        if not len(transactions):
+            return payments
+
+        tag = etree.QName(transactions[0])
+        for transaction in transactions:
+            instr_id = transaction.find(
+                './/{%s}InstrId' % tag.namespace)
+            end_to_end_id = transaction.find(
+                './/{%s}EndToEndId' % tag.namespace)
+            if instr_id is not None:
+                payments.extend(self.Payment.search([
+                            ('sepa_instruction_id', '=', instr_id.text),
+                            ('kind', '=', payment_kind),
+                            ]))
+                # JCA : In some case we can receive a bad Instruction ID, but a
+                # good end to end id, so we should try both
+                # https://support.coopengo.com/issues/21796
+                if payments:
+                    return payments
+            if end_to_end_id is not None:
+                payments.extend(self.Payment.search([
+                            ('sepa_end_to_end_id', '=', end_to_end_id.text),
+                            ('kind', '=', payment_kind),
+                            ]))
+
+        return payments
 
     def date_value(self, element):
         tag = etree.QName(element)
@@ -104,7 +130,9 @@ class CAMT054(SEPAHandler):
     def is_returned(self, element):
         tag = etree.QName(element)
         return_reason = element.find('.//{%s}RtrInf' % tag.namespace)
-        return return_reason is not None
+        if return_reason is None:
+            return False
+        return True
 
     def set_return_information(self, payment, element):
         tag = etree.QName(element)
