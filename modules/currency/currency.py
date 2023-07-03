@@ -10,6 +10,12 @@ from dateutil.relativedelta import relativedelta
 from sql import Window
 from sql.functions import NthValue
 
+try:
+    from forex_python.converter import CurrencyRates, RatesNotAvailableError
+    get_rates = CurrencyRates(force_decimal=True).get_rates
+except ImportError:
+    CurrencyRates = get_rates = None
+
 from trytond.i18n import gettext
 from trytond.model import (
     ModelView, ModelSQL, DeactivableMixin, fields, Unique, Check, SymbolMixin)
@@ -18,7 +24,6 @@ from trytond.pool import Pool
 from trytond.rpc import RPC
 from trytond.pyson import Eval, If
 
-from .ecb import RatesNotAvailableError, get_rates
 from .exceptions import RateError
 from .ir import rate_decimal
 
@@ -72,6 +77,12 @@ class Currency(SymbolMixin, DeactivableMixin, ModelSQL, ModelView):
                 'p_sign_posn', 'n_sign_posn']:
             table_h.not_null_action(col, 'remove')
 
+        # Migration from coog-2.8: Keep a reference on the euro
+        cursor.execute(*data.update(
+                [data.module],
+                ['currency_cog'],
+                where=(data.module == 'currency') & (data.fs_id == 'eur')
+                ))
         # Migration from 5.2: remove country data
         cursor.execute(*data.delete(where=(data.module == 'currency')
                 & (data.model == cls.__name__)))
@@ -137,12 +148,12 @@ class Currency(SymbolMixin, DeactivableMixin, ModelSQL, ModelView):
                 res[currency.id] = rates[0].id
             else:
                 res[currency.id] = 0
-        rate_ids = [x for x in res.values() if x]
+        rate_ids = [x for x in list(res.values()) if x]
         rates = Rate.browse(rate_ids)
         id2rate = {}
         for rate in rates:
             id2rate[rate.id] = rate
-        for currency_id in res.keys():
+        for currency_id in list(res.keys()):
             if res[currency_id]:
                 res[currency_id] = id2rate[res[currency_id]].rate
         return res
@@ -294,8 +305,7 @@ class Cron(ModelSQL, ModelView):
     __name__ = 'currency.cron'
 
     source = fields.Selection(
-        [('ecb', "European Central Bank")],
-        "Source", required=True,
+        [], "Source", required=True,
         help="The external source for rates.")
     frequency = fields.Selection([
             ('daily', "Daily"),
@@ -335,6 +345,8 @@ class Cron(ModelSQL, ModelView):
         cls._buttons.update({
                 'run': {},
                 })
+        if CurrencyRates:
+            cls.source.selection.append(('ecb', "European Central Bank"))
 
     @classmethod
     def default_frequency(cls):
@@ -375,8 +387,7 @@ class Cron(ModelSQL, ModelView):
                 yield from self._rates(date)
             except CronFetchError:
                 logger.warning("Could not fetch rates temporary")
-                if date >= datetime.date.today():
-                    break
+                break
             except Exception:
                 logger.error("Fail to fetch rates", exc_info=True)
                 break
@@ -428,8 +439,6 @@ class Cron(ModelSQL, ModelView):
             if currency.code not in values:
                 continue
             value = values[currency.code]
-            if not isinstance(value, Decimal):
-                value = Decimal(value)
             rate = get_rate(currency)
             rate.rate = value.quantize(exp, rounding=rounding)
             yield rate

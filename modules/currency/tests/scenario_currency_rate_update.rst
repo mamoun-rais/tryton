@@ -9,8 +9,8 @@ Imports::
     >>> from trytond.tests.tools import activate_modules
 
     >>> today = dt.date.today()
-    >>> previous_week = today - dt.timedelta(days=7)
-    >>> before_previous_week = previous_week - dt.timedelta(days=1)
+    >>> yesterday = today - dt.timedelta(days=1)
+    >>> before_yesterday = yesterday - dt.timedelta(days=1)
 
 Activate modules::
 
@@ -36,19 +36,19 @@ Setup cron::
     >>> cron.day = None
     >>> cron.currency = eur
     >>> cron.currencies.append(Currency(usd.id))
-    >>> cron.last_update = before_previous_week
+    >>> cron.last_update = before_yesterday
     >>> cron.save()
 
 Run update::
 
     >>> cron.click('run')
-    >>> cron.last_update >= previous_week
+    >>> cron.last_update >= yesterday
     True
 
     >>> eur.reload()
-    >>> rate = [r for r in eur.rates if r.date < today][0]
+    >>> rate, = [r for r in eur.rates if r.date == yesterday]
     >>> rate.rate
     Decimal('1.000000')
-    >>> rate = [r for r in usd.rates if r.date < today][0]
+    >>> rate, = [r for r in usd.rates if r.date == yesterday]
     >>> bool(rate.rate)
     True
