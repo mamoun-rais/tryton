@@ -30,12 +30,12 @@ class CompanyMultiValueMixin(MultiValueMixin):
         return super(CompanyMultiValueMixin, self).get_multivalue(
             name, **pattern)
 
-    def set_multivalue(self, name, value, save=True, **pattern):
+    def set_multivalue(self, name, value, **pattern):
         Value = self.multivalue_model(name)
         if issubclass(Value, CompanyValueMixin):
             pattern.setdefault('company', Transaction().context.get('company'))
         return super(CompanyMultiValueMixin, self).set_multivalue(
-            name, value, save=save, **pattern)
+            name, value, **pattern)
 
 
 class CompanyValueMixin(ValueMixin):
