@@ -67,7 +67,7 @@ class Image(BinaryMixin, Widget):
     def drag_motion(self, widget, context, x, y, timestamp):
         if self._readonly:
             return False
-        Gdk.drag_status(context, Gdk.DragAction.COPY, timestamp)
+        context.drag_status(Gdk.DragAction.COPY, timestamp)
         return True
 
     def drag_data_received(self, widget, context, x, y, selection,
@@ -81,7 +81,7 @@ class Image(BinaryMixin, Widget):
                     self.record, urllib.request.urlopen(uri).read())
             self.update_img()
         elif info == 1:
-            uri = selection.get_data().split('\r\n')[0]
+            uri = selection.data.split('\r\n')[0]
             if uri:
                 self.field.set_client(
                     self.record, urllib.request.urlopen(uri).read())

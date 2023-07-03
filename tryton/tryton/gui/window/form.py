@@ -119,9 +119,7 @@ class Form(SignalEvent, TabContent):
                     attributes.get('mode') or ['tree', 'form']))
             and self.screen.local_context == attributes.get('context')
             and self.attributes.get('search_value') == (
-                attributes.get('search_value'))
-            and self.attributes.get('tab_domain') == (
-                attributes.get('tab_domain')))
+                attributes.get('search_value')))
 
     def __hash__(self):
         return id(self)
@@ -616,7 +614,9 @@ class Form(SignalEvent, TabContent):
         name = '_'
         if signal_data[0]:
             name = str(signal_data[0])
-        for button_id in ('print', 'relate', 'email', 'open', 'save',
+        # JMO: hide direct print button
+        #for button_id in ('print', 'relate', 'email', 'open', 'save',
+        for button_id in ('relate', 'email', 'open', 'save',
                 'attach'):
             button = self.buttons[button_id]
             can_be_sensitive = getattr(button, '_can_be_sensitive', True)
@@ -634,20 +634,24 @@ class Form(SignalEvent, TabContent):
         button_switch = self.buttons['switch']
         button_switch.props.sensitive = self.screen.number_of_views > 1
 
-        menu_delete = self.menu_buttons['remove']
-        menu_delete.props.sensitive = self.screen.deletable
-        menu_save = self.menu_buttons['save']
-        menu_save.props.sensitive = not self.screen.readonly
-
-        msg = name + ' / ' + str(signal_data[1])
-        if (signal_data[1] < signal_data[2]
-                and self.screen.limit is not None
-                and signal_data[2] > self.screen.limit):
-            msg += _(' of ') + str(signal_data[2])
+        size, max_size = signal_data[1], signal_data[2]
+        if self.forced_count:
+            size_display_func = str
+        else:
+            size_display_func = common.humanize
+        msg = name + ' / ' + size_display_func(size)
+        if size < max_size:
+            extra = ''
+            if not self.forced_count and self.screen.count_limit <= max_size:
+                extra = '+'
+            msg += _(' of ') + size_display_func(max_size) + extra
         self.status_label.set_text(msg)
         self.message_info()
         self.activate_save()
         self.refresh_attachment_preview()
+        # reset forced_count to transmit the info that we're not doing accurate
+        # length computation anymore
+        self.forced_count = False
 
     def _record_modified(self, screen, signal_data):
         # As it is called via idle_add, the form could have been destroyed in
@@ -671,18 +675,17 @@ class Form(SignalEvent, TabContent):
             if value == 'ko':
                 record_id = self.screen.current_record.id
                 if self.sig_reload(test_modified=False):
-                    if record_id < 0:
-                        return None
-                    elif self.screen.current_record:
+                    if self.screen.current_record:
                         return record_id == self.screen.current_record.id
+                    elif record_id < 0:
+                        return True
             return False
         return True
 
     def sig_close(self, widget=None):
         for dialog in reversed(self.dialogs[:]):
             dialog.destroy()
-        modified_save = self.modified_save()
-        return True if modified_save is None else modified_save
+        return self.modified_save()
 
     def _action(self, action, atype):
         if not self.modified_save():
@@ -731,14 +734,15 @@ class Form(SignalEvent, TabContent):
             'print': 'tryton-print',
             'action': 'tryton-launch',
             'relate': 'tryton-link',
-            'open': 'tryton-open',
+            'email': 'tryton-email',
+            'open': 'tryton-print',
         }
         for action_type, special_action, action_name, tooltip in (
                 ('action', 'action', _('Action'), _('Launch action')),
                 ('relate', 'relate', _('Relate'), _('Open related records')),
                 (None,) * 4,
                 ('print', 'open', _('Report'), _('Open report')),
-                ('print', 'print', _('Print'), _('Print report')),
+                #('print', 'print', _('Print'), _('Print report')),
                 ):
             if action_type is not None:
                 tbutton = Gtk.ToggleToolButton()
@@ -766,11 +770,19 @@ class Form(SignalEvent, TabContent):
             menu = tbutton._menu
             if menu.get_children():
                 menu.add(Gtk.SeparatorMenuItem())
+            # Coog: move available exports to a submenu
+            exports_menuitem = Gtk.MenuItem(set_underline('Exports'))
+            exports_menuitem.set_use_underline(True)
+            menu.add(exports_menuitem)
+
+            submenu = Gtk.Menu()
+            exports_menuitem.set_submenu(submenu)
+
             for export in exports:
                 menuitem = Gtk.MenuItem(set_underline(export['name']))
                 menuitem.set_use_underline(True)
                 menuitem.connect('activate', self.do_export, export)
-                menu.add(menuitem)
+                submenu.add(menuitem)
 
         last_item = gtktoolbar.get_nth_item(gtktoolbar.get_n_items() - 1)
         if not isinstance(last_item, Gtk.SeparatorToolItem):
@@ -794,6 +806,34 @@ class Form(SignalEvent, TabContent):
         url_button.connect('toggled', self.action_popup)
         self.buttons['copy_url'] = url_button
         gtktoolbar.insert(url_button, -1)
+
+        quick_actions = toolbars.get('quick_actions', [])
+        if quick_actions:
+            gtktoolbar.insert(Gtk.SeparatorToolItem(), -1)
+        for quick_action in quick_actions:
+            icon = quick_action.get('icon.', {}).get('rec_name')
+            if not icon:
+                icon = 'tryton-executable'
+
+            # prevent problem with variables scopes in lambda
+            # cf. https://docs.python.org/3/faq/programming.html#
+            # why-do-lambdas-defined-in-a-loop-with-different-values
+            # -all-return-the-same-result
+            def make_func(n, *args):
+                return lambda z: n(*args)
+
+            # Fix for #8825
+            common.IconFactory.register_icon(icon)
+            qbutton = Gtk.ToolButton()
+            qbutton.set_icon_widget(
+                common.IconFactory.get_image(
+                    icon, Gtk.IconSize.LARGE_TOOLBAR))
+            qbutton.set_label(quick_action['name'])
+            qbutton.connect('clicked',
+                make_func(self._action, quick_action, 'quick_actions'))
+            self.tooltips.set_tip(qbutton, _(quick_action['name']))
+            gtktoolbar.insert(qbutton, -1)
+
         return gtktoolbar
 
     def _create_popup_menu(self, widget, keyword, actions, special_action):
@@ -914,3 +954,8 @@ class Form(SignalEvent, TabContent):
                     win_attach.add_uri(uri)
             else:
                 win_attach.add_uri(selection.get_text())
+
+    def _force_count(self, eventbox, event):
+        super()._force_count(eventbox, event)
+        domain = self.screen.screen_container.get_text()
+        self.screen._force_count(domain)

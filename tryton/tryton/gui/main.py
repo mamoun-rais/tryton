@@ -71,15 +71,16 @@ class Main(Gtk.Application):
         def on_change_action_boolean(action, value, key):
             action.set_state(value)
             CONFIG[key] = value.get_boolean()
-            if key == 'client.check_version' and CONFIG[key]:
-                common.check_version(self.info)
+            # Coog Specific: unplug check for new tryton version
+            # if key == 'client.check_version' and CONFIG[key]:
+            #     common.check_version(self.info)
 
         for name, key in [
                 ('mode-pda', 'client.modepda'),
                 ('save-tree-width', 'client.save_tree_width'),
                 ('save-tree-state', 'client.save_tree_state'),
                 ('spell-checking', 'client.spellcheck'),
-                ('check-version', 'client.check_version'),
+                # ('check-version', 'client.check_version'),
                 ]:
             variant = GLib.Variant.new_boolean(CONFIG[key])
             action = Gio.SimpleAction.new_stateful(name, None, variant)
@@ -120,7 +121,7 @@ class Main(Gtk.Application):
             self.window.present()
             return
 
-        self.window = Gtk.ApplicationWindow(application=self, title="Tryton")
+        self.window = Gtk.ApplicationWindow(application=self, title="Coog")
         self.window.set_default_size(960, 720)
         self.window.maximize()
         self.window.set_position(Gtk.WindowPosition.CENTER)
@@ -212,11 +213,12 @@ class Main(Gtk.Application):
 
         self.info = Gtk.VBox()
         self.vbox.pack_start(self.info, expand=False, fill=True, padding=0)
-        if CONFIG['client.check_version']:
-            common.check_version(self.info)
-            GLib.timeout_add_seconds(
-                int(CONFIG['download.frequency']), common.check_version,
-                self.info)
+        # Coog Specific: unplug check for new tryton version
+        # if CONFIG['client.check_version']:
+        #     common.check_version(self.info)
+        #     GLib.timeout_add_seconds(
+        #         int(CONFIG['download.frequency']), common.check_version,
+        #         self.info)
 
         self.pane = Gtk.HPaned()
         self.vbox.pack_start(self.pane, expand=True, fill=True, padding=0)
@@ -240,6 +242,9 @@ class Main(Gtk.Application):
         self.current_page = 0
         self.last_page = 0
         self.dialogs = []
+        self._global_run = False
+        self._global_check_timeout_id = None
+        self._global_update_timeout_id = None
 
         # Register plugins
         tryton.plugins.register()
@@ -347,6 +352,8 @@ class Main(Gtk.Application):
 
         def update(widget, search_text, callback=None):
             def end():
+                self._global_update_timeout_id = None
+                self._global_run = False
                 if callback:
                     callback()
                 return False
@@ -366,6 +373,8 @@ class Main(Gtk.Application):
                 except RPCException:
                     result = []
                 if search_text != widget.get_text():
+                    self._global_update_timeout_id = None
+                    self._global_run = False
                     if callback:
                         callback()
                     return False
@@ -387,14 +396,34 @@ class Main(Gtk.Application):
                 widget.emit('changed')
                 end()
 
+            self._global_run = True
             RPCExecute('model', 'ir.model', 'global_search', search_text,
                 CONFIG['client.limit'], self.menu_screen.model_name,
                 context=self.menu_screen.context, callback=set_result)
             return False
 
+        def check_timeout(widget, search_text):
+            # This method tries to avoid multiple global_search queries running
+            # concurrently on the server by waiting that one is complete before
+            # sending another. If a query is made while another is already
+            # waiting, it replaces it. Ideally there should be locks on _global
+            # attributes updates, but it does not seem mandatory so we will add
+            # them later if needed
+            if self._global_run:
+                if self._global_check_timeout_id:
+                    GLib.source_remove(self._global_check_timeout_id)
+                self._global_check_timeout_id = GLib.timeout_add(500,
+                    check_timeout, widget, search_text)
+                return True
+            else:
+                self._global_update_timeout_id = GLib.timeout_add(500,
+                    update, widget, search_text)
+                self._global_check_timeout_id = None
+                return False
+
         def changed(widget):
             search_text = widget.get_text()
-            GLib.timeout_add(300, update, widget, search_text)
+            check_timeout(widget, search_text)
 
         def activate(widget):
             def message():
@@ -409,7 +438,8 @@ class Main(Gtk.Application):
         self.global_search_entry.connect('changed', changed)
         self.global_search_entry.connect('activate', activate)
 
-    def set_title(self, value=''):
+    # ABD: Add possibility to choose the business date
+    def set_title(self, value='', date=''):
         if CONFIG['login.profile']:
             login_info = CONFIG['login.profile']
         else:
@@ -420,8 +450,7 @@ class Main(Gtk.Application):
         titles = []
         if value:
             titles.append(value)
-        titles.append(CONFIG['client.title'])
-        self.header.set_title(' - '.join(titles))
+        self.header.set_title(' - '.join(titles) + ' (' + date + ')')
         self.header.set_subtitle(login_info)
         try:
             style_context = self.header.get_style_context()
@@ -489,8 +518,7 @@ class Main(Gtk.Application):
             barstyle = Gtk.ToolbarStyle.ICONS
         for page_idx in range(self.notebook.get_n_pages()):
             page = self.get_page(page_idx)
-            if page.toolbar:
-                page.toolbar.set_style(barstyle)
+            page.toolbar.set_style(barstyle)
 
     def edit_limit(self):
         from tryton.gui.window.limit import Limit
@@ -506,7 +534,7 @@ class Main(Gtk.Application):
         page = self.notebook.get_current_page()
         self.notebook.set_current_page(page - 1)
 
-    def get_preferences(self):
+    def get_preferences(self, date=''):
         RPCContextReload()
         try:
             prefs = RPCExecute('model', 'res.user', 'get_preferences', False)
@@ -532,7 +560,15 @@ class Main(Gtk.Application):
         self.sig_win_menu(prefs=prefs)
         for action_id in prefs.get('actions', []):
             Action.execute(action_id, {})
-        self.set_title(prefs.get('status_bar', ''))
+        # XXX: add connection date
+        connection_date = date.strftime('%d/%m/%Y') if date else ''
+        self.set_title(prefs.get('status_bar', ''), connection_date)
+        # AKE: change bg color based on preferences
+        color_bg = prefs.get('color_bg', None
+            ) or os.environ.get('TRYTON_CLIENT_BG_COLOR', None)
+        if color_bg:
+            self.window.modify_bg(Gtk.StateType.NORMAL,
+                Gdk.color_parse(color_bg))
         if prefs and 'language' in prefs:
             translate.setlang(prefs['language'], prefs.get('locale'))
             if CONFIG['client.lang'] != prefs['language']:
@@ -711,6 +747,16 @@ class Main(Gtk.Application):
                 'id': record_id,
                 }, warning=False)
 
+    def menu_row_activate(self):
+        screen = self.menu_screen
+        record_id = (screen.current_record.id
+            if screen.current_record else None)
+        # ids is not defined to prevent to add suffix
+        return Action.exec_keyword('tree_open', {
+                'model': screen.model_name,
+                'id': record_id,
+                }, warning=False)
+
     def sig_win_menu(self, prefs=None):
         from tryton.gui.window.view_form.screen import Screen
 
@@ -735,7 +781,8 @@ class Main(Gtk.Application):
         ctx = rpc.CONTEXT.copy()
         decoder = PYSONDecoder(ctx)
         action_ctx = decoder.decode(action.get('pyson_context') or '{}')
-        domain = decoder.decode(action['pyson_domain'])
+        # Postpone domain eval
+        domain = action['pyson_domain']
         screen = Screen(action['res_model'], mode=['tree'], view_ids=view_ids,
             domain=domain, context=action_ctx, readonly=True, limit=None,
             row_activate=self.menu_row_activate)
@@ -836,7 +883,7 @@ class Main(Gtk.Application):
                 expand=False, fill=False, padding=0)
         name = page.name
         label = Gtk.Label(
-            label=common.ellipsize(name, 20),
+            label=common.ellipsize(name.split(' / ')[-1], 20),
             halign=Gtk.Align.START)
         self.tooltips.set_tip(label, page.name)
         self.tooltips.enable()
@@ -963,7 +1010,6 @@ class Main(Gtk.Application):
                 return
 
         def open_model(path):
-            attributes = {}
             model, path = (path.split('/', 1) + [''])[:2]
             if not model:
                 return
@@ -971,9 +1017,7 @@ class Main(Gtk.Application):
             mode = None
             try:
                 view_ids = json.loads(params.get('views', '[]'))
-                if 'limit' in params:
-                    attributes['limit'] = json.loads(
-                        params.get('limit', 'null'))
+                limit = json.loads(params.get('limit', 'null'))
                 name = json.loads(params.get('name', '""'))
                 search_value = json.loads(params.get('search_value', '[]'),
                     object_hook=object_hook)
@@ -1001,9 +1045,9 @@ class Main(Gtk.Application):
                     context_model=context_model,
                     mode=mode,
                     name=name,
+                    limit=limit,
                     search_value=search_value,
-                    tab_domain=tab_domain,
-                    **attributes)
+                    tab_domain=tab_domain)
             except Exception:
                 # Prevent crashing the client
                 return
@@ -1073,7 +1117,7 @@ class Main(Gtk.Application):
 
     def show_notification(self, title, msg, priority=1):
         notification = Gio.Notification.new(title)
-        notification.set_body(msg)
+        notification.set_body('\n'.join(msg))
         notification.set_priority(_PRIORITIES[priority])
         if sys.platform != 'win32' or GLib.glib_version >= (2, 57, 0):
             self.send_notification(None, notification)

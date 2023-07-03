@@ -81,6 +81,10 @@ class EditableTreeView(TreeView):
     leaving_events = leaving_record_events + (
         Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Enter)
 
+    def __init__(self, view, editable_open=False):
+        super().__init__(view)
+        self.editable_open = editable_open
+
     def on_quit_cell(
             self, current_record, column, renderer, value, callback=None):
         field = current_record[column.name]
@@ -194,6 +198,9 @@ class EditableTreeView(TreeView):
                     model = entry.get_model()
                     index = entry.get_property('entry-text-column')
                     txt = model[active][index]
+                # It seems that the remove-widget signal is only sent when
+                # activating the combobox or when pressing escape.
+                GLib.idle_add(entry.emit, 'remove-widget')
             else:
                 return True
             keyval = event.keyval

@@ -133,12 +133,9 @@ class WinImport(WinCSV):
                                     (prefix + parent):
                                 self.on_row_expanded(self.view1, iter,
                                         self.model1.get_path(iter))
-                                iter = self.model1.iter_children(iter)
-                                prefix = parent + '/'
                                 break
-                            else:
-                                iter = self.model1.iter_next(iter)
-
+                            iter = self.model1.iter_next(iter)
+                        prefix = parent + '/'
                 if word in self.fields_invert:
                     name = word
                     field = self.fields_invert[word]

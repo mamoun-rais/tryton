@@ -185,7 +185,7 @@ class WinExport(WinCSV):
 
     def on_row_expanded(self, treeview, iter, path):
         child = self.model1.iter_children(iter)
-        if child and self.model1.get_value(child, 0) is None:
+        if self.model1.get_value(child, 0) is None:
             prefix_field = self.model1.get_value(iter, 1)
             string_, relation = self.fields[prefix_field]
             self.model_populate(self._get_fields(relation), iter,
@@ -380,13 +380,13 @@ class WinExport(WinCSV):
         self.destroy()
 
     def export_csv(self, fname, fields, data, paths, popup=True):
-        encoding = self.csv_enc.get_active_text() or 'UTF-8'
+        encoding = self.csv_enc.get_active_text() or 'utf_8_sig'
         locale_format = self.csv_locale.get_active()
 
         try:
+            file_obj = open(fname, 'w', encoding=encoding, newline='')
             writer = csv.writer(
-                open(fname, 'w', encoding=encoding, newline=''),
-                quotechar=self.get_quotechar(),
+                file_obj, quotechar=self.get_quotechar(),
                 delimiter=self.get_delimiter())
             if self.add_field_names.get_active():
                 writer.writerow(fields)
@@ -468,8 +468,7 @@ class WinExport(WinCSV):
         else:
             domain = self.screen.search_domain(
                 self.screen.screen_container.get_text())
-            if (not self.ignore_search_limit.get_active()
-                    and self.screen.limit is not None):
+            if not self.ignore_search_limit.get_active():
                 query_string.append(('s', str(self.screen.limit)))
                 query_string.append(
                     ('p', str(self.screen.offset // self.screen.limit)))

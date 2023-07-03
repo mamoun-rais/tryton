@@ -109,23 +109,6 @@ def likify(value, escape='\\'):
         return '%' + value + '%'
 
 
-def is_full_text(value, escape='\\'):
-    escaped = value.strip('%')
-    escaped = escaped.replace(escape + '%', '').replace(escape + '_', '')
-    if '%' in escaped or '_' in escaped:
-        return False
-    return value.startswith('%') and value.endswith('%')
-
-
-def is_like(value, escape='\\'):
-    escaped = value.replace(escape + '%', '').replace(escape + '_', '')
-    return '%' in escaped or '_' in escaped
-
-
-def unescape(value, escape='\\'):
-    return value.replace(escape + '%', '%').replace(escape + '_', '_')
-
-
 def quote(value):
     "Quote string if needed"
     if not isinstance(value, str):
@@ -177,7 +160,7 @@ def append_ending_clause(domain, clause, deep):
 def default_operator(field):
     "Return default operator for field"
     if field['type'] in ('char', 'text', 'many2one', 'many2many', 'one2many',
-            'reference', 'one2one'):
+            'reference'):
         return 'ilike'
     elif field['type'] == 'multiselection':
         return 'in'
@@ -611,7 +594,8 @@ class DomainParser(object):
             if name.endswith('.rec_name'):
                 name = name[:-9]
             if name not in self.fields:
-                if is_full_text(value):
+                escaped = value.replace('%%', '__')
+                if escaped.startswith('%') and escaped.endswith('%'):
                     value = value[1:-1]
                 return quote(value)
             field = self.fields[name]
@@ -622,14 +606,15 @@ class DomainParser(object):
                 target = None
 
             if 'ilike' in operator:
-                if is_full_text(value):
+                escaped = value.replace('%%', '__')
+                if escaped.startswith('%') and escaped.endswith('%'):
                     value = value[1:-1]
-                elif not is_like(value):
+                elif '%' not in escaped:
                     if operator == 'ilike':
                         operator = '='
                     else:
                         operator = '!'
-                    value = unescape(value)
+                    value = value.replace('%%', '%')
             def_operator = default_operator(field)
             if def_operator == operator.strip():
                 operator = ''
@@ -711,6 +696,8 @@ class DomainParser(object):
                 name = name[:-9]
             value = target
         if name == 'rec_name':
+            if type(value) is list:
+                return
             if operator == 'ilike':
                 escaped = value.replace('%%', '__')
                 if escaped.startswith('%') and escaped.endswith('%'):

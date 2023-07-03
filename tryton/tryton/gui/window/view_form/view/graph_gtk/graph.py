@@ -443,10 +443,10 @@ class Graph(Gtk.DrawingArea):
             self.maxyval = 0.0
             self.minyval = 0.0
         else:
-            self.maxyval = max([reduce(lambda x, y: max(x, y), x.values())
-                    for x in self.datas.values()])
-            self.minyval = min([reduce(lambda x, y: min(x, y), x.values())
-                    for x in self.datas.values()])
+            self.maxyval = max([reduce(lambda x, y: max(x, y), list(x.values()))
+                    for x in list(self.datas.values())])
+            self.minyval = min([reduce(lambda x, y: min(x, y), list(x.values()))
+                    for x in list(self.datas.values())])
         if self.minyval > 0:
             self.minyval = 0.0
 

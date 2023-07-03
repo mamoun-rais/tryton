@@ -159,8 +159,7 @@ class HTML(Widget, TranslateMixin):
 
     def _readonly_set(self, value):
         super()._readonly_set(value)
-        for button in self.widget.get_children():
-            button.set_sensitive(not value)
+        self.button.set_sensitive(not value)
 
     def translate_dialog(self, languages):
         languages = {l['name']: l['code'] for l in languages}

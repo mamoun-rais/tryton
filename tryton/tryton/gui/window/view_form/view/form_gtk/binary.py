@@ -193,7 +193,6 @@ class Binary(BinaryMixin, Widget):
         return False
 
     def sig_icon_press(self, widget, icon_pos, event):
-        widget.grab_focus()
         if icon_pos == Gtk.EntryIconPosition.PRIMARY:
             self.open_()
 
@@ -234,3 +233,9 @@ class Binary(BinaryMixin, Widget):
             self.filename_field.set_client(self.record,
                     self.wid_text.get_text() or False)
         return
+
+    def _color_widget(self):
+        if self.wid_text:
+            return self.wid_text
+        else:
+            return self.wid_size

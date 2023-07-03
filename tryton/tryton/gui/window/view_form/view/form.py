@@ -36,6 +36,8 @@ from .form_gtk.multiselection import MultiSelection
 from .form_gtk.pyson import PYSON
 from .form_gtk.state_widget import (Label, VBox, Image, Frame, ScrolledWindow,
     Notebook, Expander, Link)
+from .form_gtk.sourceeditor import SourceView
+
 
 _ = gettext.gettext
 
@@ -186,6 +188,7 @@ class FormXMLViewParser(XMLViewParser):
         'reference': Reference,
         'richtext': RichTextBox,
         'selection': Selection,
+        'source': SourceView,  # Coopengo specific
         'sip': SIP,
         'text': TextBox,
         'time': Time,
@@ -228,8 +231,14 @@ class FormXMLViewParser(XMLViewParser):
             self.container.add(None, attributes)
             return
 
+        # RSE Display more useful info when trying to display unexisting field
+        if 'widget' not in attributes:
+            raise Exception('Unknown field %s' % attributes['name'])
         widget = self.WIDGETS[attributes['widget']](self.view, attributes)
         self.view.widgets[name].append(widget)
+
+        if attributes.get('group'):
+            group = attributes['group']
 
         if widget.expand:
             attributes.setdefault('yexpand', True)
@@ -507,7 +516,7 @@ class ViewForm(View):
                         field.get_state_attrs(record)['invalid'] = False
                         widget.display()
 
-    def display(self):
+    def display(self, force=False):
         record = self.record
         if record:
             # Force to set fields in record

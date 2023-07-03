@@ -83,6 +83,9 @@ class Many2One(Widget):
             return self.field.get_client(self.record) != value
         return False
 
+    def _color_widget(self):
+        return self.wid_text
+
     @staticmethod
     def has_target(value):
         return value is not None
@@ -136,10 +139,7 @@ class Many2One(Widget):
                     exclude_field=self.attrs.get('relation_field'))
                 win.screen.search_filter(quote(text))
                 if len(win.screen.group) == 1:
-                    callback([
-                            (r.id, r.value.get('rec_name', ''))
-                            for r in win.screen.group])
-                    win.destroy()
+                    win.response(None, Gtk.ResponseType.OK)
                 else:
                     win.show()
                 return
@@ -182,8 +182,6 @@ class Many2One(Widget):
             rec_name=self.wid_text.get_text())
 
     def sig_edit(self, entry=None, icon_pos=None, *args):
-        if entry:
-            entry.grab_focus()
         model = self.get_model()
         if not model or not common.MODELACCESS[model]['read']:
             return

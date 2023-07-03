@@ -5,7 +5,6 @@ import os
 import gettext
 import webbrowser
 from functools import wraps, partial
-from weakref import WeakKeyDictionary
 
 from gi.repository import Gdk, GLib, Gtk
 
@@ -51,23 +50,40 @@ def send_keys(renderer, editable, position, treeview):
         editable.connect('changed', changed)
 
 
+EMPTY_SVG = b"""<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 20010904//EN"
+ "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">
+<svg version="1.0" xmlns="http://www.w3.org/2000/svg" width="24" height="24"/>
+"""
+EMPTY_IMG = data2pixbuf(EMPTY_SVG)
+
+
 def realized(func):
+    "Decorator for treeview realized"
+    PIXBUF_CACHE = {}
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        has_been_realized = _REALIZED.get(self.view.treeview, False)
-        if not has_been_realized:
-            has_been_realized = self.view.treeview.get_realized()
-            if has_been_realized:
-                self.view.treeview.queue_resize()
-                _REALIZED[self.view.treeview] = True
-            else:
-                return
+        if (hasattr(self.view.treeview, 'get_realized')
+                and not self.view.treeview.get_realized()):
+            cell = args[1]
+            if isinstance(cell, Gtk.CellRendererText):
+                cell.set_property('text', ' ' * 3)
+            elif isinstance(cell, Gtk.CellRendererPixbuf):
+                if isinstance(self, (Affix, _BinaryIcon)):
+                    _, width, height = Gtk.IconSize.lookup(Gtk.IconSize.MENU)
+                else:
+                    width = getattr(self, 'width', 300)
+                    height = getattr(self, 'height', 100)
+                key = (id(self), width, height)
+                if key not in PIXBUF_CACHE:
+                    PIXBUF_CACHE[key] = common.resize_pixbuf(
+                        EMPTY_IMG, height, width)
+                cell.set_property('pixbuf', PIXBUF_CACHE[key])
+            return
         return func(self, *args, **kwargs)
+
     return wrapper
-
-
-_REALIZED = WeakKeyDictionary()
 
 
 class CellCache(list):
@@ -109,7 +125,8 @@ class CellCache(list):
                 self.cell_caches = {}
             record = store.get_value(iter_, 0)
             counter = self.view.treeview.display_counter
-            if (self.display_counters.get(record.id) != counter):
+            if (self.display_counters.get((record.model_name, record.id)) !=
+                    counter):
                 if getattr(cell, 'decorated', None):
                     func(self, column, cell, store, iter_, user_data)
                 else:
@@ -117,10 +134,11 @@ class CellCache(list):
                     cache.decorate(cell)
                     func(self, column, cell, store, iter_, user_data)
                     cache.undecorate(cell)
-                    self.cell_caches[record.id] = cache
-                    self.display_counters[record.id] = counter
+                    self.cell_caches[(record.model_name, record.id)] = cache
+                    self.display_counters[(record.model_name, record.id)] = \
+                        counter
             else:
-                self.cell_caches[record.id].apply(cell)
+                self.cell_caches[(record.model_name, record.id)].apply(cell)
         return wrapper
 
 
@@ -314,6 +332,21 @@ class GenericText(Cell):
             if invisible:
                 readonly = True
 
+            if not isinstance(cell, CellRendererToggle):
+                bg_color = 'white'
+                if field.get_state_attrs(record).get('invalid', False):
+                    bg_color = COLORS.get('invalid', 'white')
+                elif bool(int(
+                            field.get_state_attrs(record).get('required', 0))):
+                    bg_color = COLORS.get('required', 'white')
+                cell.set_property('background', bg_color)
+                if bg_color == 'white':
+                    cell.set_property('background-set', False)
+                else:
+                    cell.set_property('background-set', True)
+                    cell.set_property('foreground-set',
+                        not (record.deleted or record.removed))
+
             if isinstance(cell, CellRendererToggle):
                 cell.set_property('activatable', not readonly)
             elif isinstance(cell,
@@ -325,7 +358,49 @@ class GenericText(Cell):
         else:
             if isinstance(cell, CellRendererToggle):
                 cell.set_property('activatable', False)
+        # ABD See #3428
+        self._format_set(record, field, cell)
         self._set_visual(cell, record)
+
+    def _set_foreground(self, value, cell):
+        cell.set_property('foreground', value)
+
+    def _set_background(self, value, cell):
+        cell.set_property('background', value)
+
+    def _set_font(self, value, cell):
+        cell.set_property('font', value)
+
+    def _format_set(self, record, field, cell):
+        functions = {
+            'color': self._set_foreground,
+            'fg': self._set_foreground,
+            'bg': self._set_background,
+            'font': self._set_font
+            }
+        attrs = record.expr_eval(field.get_state_attrs(record).
+            get('states', {}))
+        states = record.expr_eval(self.attrs.get('states', {})).copy()
+        states.update(attrs)
+        if isinstance(cell, CellRendererText) and \
+                cell.get_property('font') != 'Normal':
+            cell.set_property('font', 'Normal')
+        for attr in list(states.keys()):
+            if not states[attr]:
+                continue
+            key = attr.split('_')
+            if key[0] == 'field':
+                key = key[1:]
+            if key[0] == 'label':
+                continue
+            if isinstance(states[attr], str):
+                key.append(states[attr])
+            if key[0] in functions:
+                if len(key) != 2:
+                    err = 'Wrong key format [type]_[style]_[value]: '
+                    err += attr
+                    raise ValueError(err)
+                functions[key[0]](key[1], cell)
 
     def open_remote(self, record, create, changed=False, text=None,
             callback=None):
@@ -431,6 +506,9 @@ class Boolean(GenericText):
             record[self.attrs['name']].set_client(record, int(not value))
             self.view.treeview.set_cursor(path)
         return True
+
+    def set_editable(self):
+        pass
 
 
 class URL(Char):
@@ -816,7 +894,6 @@ class M2O(GenericText):
                 editable.set_icon_tooltip_text(pos, tooltip)
 
         def icon_press(editable, icon_pos, event):
-            editable.grab_focus()
             value = field.get(record)
             if not model:
                 return
@@ -997,8 +1074,6 @@ class O2M(GenericText):
         screen = Screen(relation, mode=['tree', 'form'],
             view_ids=self.attrs.get('view_ids', '').split(','),
             exclude_field=field.attrs.get('relation_field'),
-            limit=None,
-            context=self.view.screen.context,
             breadcrumb=breadcrumb)
         screen.pre_validate = bool(int(self.attrs.get('pre_validate', 0)))
         screen.group = group
@@ -1025,8 +1100,6 @@ class M2M(O2M):
         screen = Screen(relation, mode=['tree', 'form'],
             view_ids=self.attrs.get('view_ids', '').split(','),
             exclude_field=field.attrs.get('relation_field'),
-            limit=None,
-            context=self.view.screen.context,
             breadcrumb=breadcrumb)
         screen.group = group
 
@@ -1044,15 +1117,21 @@ class Selection(GenericText, SelectionMixin, PopdownMixin):
             kwargs['renderer'] = CellRendererCombo
         super(Selection, self).__init__(*args, **kwargs)
         self.init_selection()
-        # Use a variable let Python holding reference when calling set_property
-        model = self.get_popdown_model(self.selection)[0]
-        self.renderer.set_property('model', model)
-        self.renderer.set_property('text-column', 0)
+        if self.view.editable:
+            # Use a variable let Python holding reference when calling
+            # set_property
+            model = self.get_popdown_model(self.selection)[0]
+            self.renderer.set_property('model', model)
+            self.renderer.set_property('text-column', 0)
 
     def get_value(self, record, field):
         return field.get(record)
 
     def get_textual_value(self, record):
+        related = self.attrs['name'] + ':string'
+        if not self.view.editable and record.value.get(related):
+            return record.value[related]
+
         field = record[self.attrs['name']]
         self.update_selection(record, field)
         value = self.get_value(record, field)
@@ -1301,24 +1380,17 @@ class Button(Cell):
         # TODO icon
         self._set_visual(cell, record)
 
-    @common.idle_add
     def button_clicked(self, widget, path):
         if not path:
             return True
         store = self.view.treeview.get_model()
         record = store.get_value(store.get_iter(path), 0)
 
-        if self.view.record and self.view.record != record:
-            widget.stop_emission_by_name('clicked')
-            return True
-
         state_changes = record.expr_eval(
             self.attrs.get('states', {}))
         if state_changes.get('invisible') \
                 or state_changes.get('readonly'):
             return True
-
-        self.view.treeview.set_cursor(path)
         widget.handler_block_by_func(self.button_clicked)
         try:
             self.view.screen.button(self.attrs)

@@ -1,8 +1,9 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import logging
 from tryton.signal_event import SignalEvent
-import tryton.common as common
 from tryton.pyson import PYSONDecoder
+import tryton.common as common
 from . import field as fields
 from tryton.common import RPCExecute, RPCException
 from tryton.config import CONFIG
@@ -10,7 +11,9 @@ from tryton.config import CONFIG
 
 class Record(SignalEvent):
 
-    id = -1
+    # JCA : Make sure we cannot have id conflicts in case of bugs on temporary
+    # ids being inverted
+    id = -100000000
 
     def __init__(self, model_name, obj_id, group=None):
         super(Record, self).__init__()
@@ -70,16 +73,26 @@ class Record(SignalEvent):
             fnames = [fname for fname, field in fields
                 if fname not in self._loaded
                 and (not views or (views & field.views))]
-            fnames.extend(('%s.rec_name' % fname for fname in fnames[:]
-                    if self.group.fields[fname].attrs['type']
-                    in ('many2one', 'one2one', 'reference')))
+            for fname in fnames[:]:
+                f_attrs = self.group.fields[fname].attrs
+                if f_attrs['type'] in {'many2one', 'one2one', 'reference'}:
+                    fnames.append('%s.rec_name' % fname)
+                elif (f_attrs['type'] == 'selection'
+                        and f_attrs.get('loading', 'eager') == 'eager'):
+                    fnames.append('%s:string' % fname)
             if 'rec_name' not in fnames:
                 fnames.append('rec_name')
             fnames.extend(['_timestamp', '_write', '_delete'])
 
             record_context = self.get_context()
             if loading == 'eager':
-                limit = int(CONFIG['client.limit'] / len(fnames))
+                # JCA: This controls how many lines will be fetched at once
+                # (typically when opening a list view).
+                # The "client.limit / len(fnames)" is not bad heuristic, but
+                # for models with a lot of fields, reading "one by one" is
+                # probably not the solution anyway. A minimum of 20 makes it 2
+                # calls to fill a list view, and seems good enough
+                limit = max(int(CONFIG['client.limit'] / len(fnames)), 20)
 
                 def filter_group(record):
                     return (not record.destroyed
@@ -146,7 +159,23 @@ class Record(SignalEvent):
 
     @property
     def modified(self):
-        return bool(self.modified_fields)
+        result = bool(self.modified_fields)
+        if not result:
+            return result
+        # JCA #15014 Add a way to make sure some fields are always ignored when
+        # detecting whether the record needs saving
+        for field in self.modified_fields:
+            if field not in self.group.fields:
+                break
+            if not self.group.fields[field].attrs.get(
+                    'never_modified', False):
+                break
+        else:
+            return False
+        logging.getLogger('root').critical(
+            '%s : modified fields : %s' % (
+                self, list(self.modified_fields.keys())))
+        return result
 
     @property
     def parent(self):
@@ -176,20 +205,27 @@ class Record(SignalEvent):
         if value:
             self.signal('record-modified')
 
-    def children_group(self, field_name):
-        if not field_name:
-            return []
+    def children_group(self, field_name, children_definitions):
+        if field_name not in self.group.fields:
+            return None
         self._check_load([field_name])
         group = self.value.get(field_name)
         if group is None:
             return None
 
-        if id(group.fields) != id(self.group.fields):
-            self.group.fields.update(group.fields)
-            group.fields = self.group.fields
-        group.on_write = self.group.on_write
-        group.readonly = self.group.readonly
-        group._context.update(self.group._context)
+        if group.model_name == self.group.model_name:
+            if id(group.fields) != id(self.group.fields):
+                self.group.fields.update(group.fields)
+                group.fields = self.group.fields
+            group.on_write = self.group.on_write
+            group.readonly = self.group.readonly
+            group._context.update(self.group._context)
+        else:
+            fields = children_definitions[group.model_name].copy()
+            # Force every field of the multi-model to be eager-loaded
+            for field_def in fields.values():
+                field_def['loading'] = 'eager'
+            group.load_fields(fields)
         return group
 
     def get_path(self, group):
@@ -358,6 +394,7 @@ class Record(SignalEvent):
         return self.id
 
     def default_get(self, rec_name=None):
+        vals = None
         if len(self.group.fields):
             context = self.get_context()
             context.setdefault('default_rec_name', rec_name)
@@ -391,7 +428,7 @@ class Record(SignalEvent):
         elif fields is None:
             self._check_load()
         res = True
-        for field_name, field in list(self.group.fields.items()):
+        for field_name, field in self.group.fields.items():
             if fields is not None and field_name not in fields:
                 continue
             if field.attrs.get('readonly'):
@@ -462,6 +499,9 @@ class Record(SignalEvent):
                         fields.ReferenceField)):
                 related = fieldname + '.'
                 self.value[related] = val.get(related) or {}
+            if isinstance(self.group.fields[fieldname], fields.SelectionField):
+                related = fieldname + ':string'
+                self.value[related] = val.get(related)
             self.group.fields[fieldname].set(self, value)
             self._loaded.add(fieldname)
             fieldnames.append(fieldname)

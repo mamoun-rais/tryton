@@ -8,6 +8,7 @@ from tryton import rpc
 from tryton.signal_event import SignalEvent
 from tryton.common.domain_inversion import is_leaf
 from tryton.common import RPCExecute, RPCException, MODELACCESS
+from tryton.pyson import PYSONDecoder
 
 
 class Group(SignalEvent, list):
@@ -59,10 +60,14 @@ class Group(SignalEvent, list):
 
     @property
     def domain(self):
+        group_domain = self.__domain
+        if group_domain and isinstance(group_domain, str):
+            decoder = PYSONDecoder(self.context)
+            group_domain = decoder.decode(group_domain)
         if self.parent and self.child_name:
             field = self.parent.group.fields[self.child_name]
-            return [self.__domain, field.domain_get(self.parent)]
-        return self.__domain
+            return [group_domain, field.domain_get(self.parent)]
+        return group_domain
 
     def clean4inversion(self, domain):
         "This method will replace non relevant fields for domain inversion"
@@ -80,8 +85,14 @@ class Group(SignalEvent, list):
             head = self.clean4inversion(head)
         return [head] + self.clean4inversion(tail)
 
+    def get_domain(self):
+        if not self.domain or not isinstance(self.domain, str):
+            return self.domain
+        decoder = PYSONDecoder(self.context)
+        return decoder.decode(self.domain)
+
     def __get_domain4inversion(self):
-        domain = self.domain
+        domain = self.get_domain()
         if (self.__domain4inversion is None
                 or self.__domain4inversion[0] != domain):
             self.__domain4inversion = (
@@ -133,8 +144,6 @@ class Group(SignalEvent, list):
         # has more chances to be on top of the list.
         length = self.__len__()
         for record in reversed(self[:]):
-            # Destroy record before propagating the signal to recursively
-            # destroy also the underlying records
             record.destroy()
             self.signal(
                 'group-list-changed', ('record-removed', record, length - 1))
@@ -248,7 +257,8 @@ class Group(SignalEvent, list):
         if not ids:
             return True
 
-        if len(ids) > 1:
+        # PJA : Select first entry in list if even if there is only one #3431
+        if len(ids) >= 1:
             self.lock_signal = True
 
         new_records = []

@@ -63,6 +63,8 @@ class Wizard(InfoBar):
         self.context['active_ids'] = self.ids
         self.context['active_model'] = self.model
         self.context['action_id'] = self.action_id
+        self.context['direct_print'] = self.direct_print
+        self.context['email_print'] = self.email_print
 
         def callback(result):
             try:
@@ -294,7 +296,7 @@ class WizardForm(Wizard, TabContent, SignalEvent):
 
     def set_cursor(self):
         if self.screen:
-            self.screen.set_cursor()
+            self.screen.set_cursor(reset_view=False)
 
 
 class WizardDialog(Wizard, NoModal):
@@ -375,11 +377,14 @@ class WizardDialog(Wizard, NoModal):
         else:
             dialog = self.page
         screen = getattr(dialog, 'screen', None)
-        if self.sensible_widget == main.window:
+        # JMO: the conditions added on 'reload' are needed
+        # for https://support.coopengo.com/issues/12986
+        if action != 'reload' and self.sensible_widget == main.window:
             screen = main.menu_screen
         if screen:
             if (screen.current_record
-                    and self.sensible_widget != main.window):
+                    and self.sensible_widget != main.window or
+                    action == 'reload'):
                 if screen.model_name == self.model:
                     ids = self.ids
                 else:
@@ -412,15 +417,11 @@ class WizardDialog(Wizard, NoModal):
             width, height = self.default_size()
         else:
             width, height = -1, -1
-        self.dia.set_default_size(width, height)
-        # reshow with initial size
-        self.dia.hide()
-        self.dia.unrealize()
+        self.dia.set_default_size(max(200, width), height)
+        width, height = self.dia.get_default_size()
+        if width > 0 and height > 0:
+            self.dia.resize(*self.dia.get_default_size())
         self.dia.show()
-        width, height = self.dia.get_size()
-        screen = self.dia.get_screen()
-        self.dia.resize(
-            min(width, screen.width()), min(height, screen.height()))
 
     def hide(self):
         self.dia.hide()

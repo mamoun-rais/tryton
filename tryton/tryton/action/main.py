@@ -1,8 +1,10 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import copy
 import gettext
 import webbrowser
-
+import os
+import tempfile
 import tryton.rpc as rpc
 from tryton.common import RPCExecute, RPCException
 from tryton.common import message, selection, file_write, file_open
@@ -101,7 +103,7 @@ class Action(object):
             ctx = {
                 'active_model': data.get('model'),
                 'active_id': data.get('id'),
-                'active_ids': data.get('ids') or [],
+                'active_ids': data.get('ids', []),
             }
             ctx.update(rpc.CONTEXT)
             ctx['_user'] = rpc._USER
@@ -109,6 +111,8 @@ class Action(object):
             action_ctx = context.copy()
             action_ctx.update(
                 decoder.decode(action.get('pyson_context') or '{}'))
+            # XXX: add extra_context
+            action_ctx.update(data.get('extra_context', {}))
             ctx.update(action_ctx)
 
             ctx['context'] = ctx
@@ -116,8 +120,15 @@ class Action(object):
             domain = decoder.decode(action['pyson_domain'])
             order = decoder.decode(action['pyson_order'])
             search_value = decoder.decode(action['pyson_search_value'] or '[]')
-            tab_domain = [(n, decoder.decode(d), c)
-                for n, d, c in action['domains']]
+            # XXX: Evaluate tab domain later
+            # Dynamic domain evaluation in screens and tabs
+            # see : 4cfefeab5
+            action_ctx.update({
+                    'active_model': data.get('model'),
+                    'active_id': data.get('id'),
+                    'active_ids': data.get('ids', []),
+                    })
+            tab_domain = [(n, (ctx, d), c) for n, d, c in action['domains']]
 
             name = action.get('name', '')
             if action.get('keyword', ''):
@@ -142,11 +153,13 @@ class Action(object):
                 icon=(action.get('icon.rec_name') or ''),
                 tab_domain=tab_domain,
                 context_model=action['context_model'],
-                context_domain=action['context_domain'])
+                context_domain=action.get('context_domain', None))
         elif action['type'] == 'ir.action.wizard':
             name = action.get('name', '')
             if action.get('keyword', 'form_action') == 'form_action':
                 name = add_name_suffix(name, context)
+            context = copy.deepcopy(context)
+            context.update(data.get('extra_context', {}))
             Window.create_wizard(action['wiz_name'], data,
                 direct_print=action.get('direct_print', False),
                 name=name,
@@ -176,7 +189,7 @@ class Action(object):
 
         keyact = {}
         for action in actions:
-            keyact[action['name'].split(' / ')[-1]] = action
+            keyact[action['name'].replace('_', '')] = action
 
         res = selection(_('Select your action'), keyact, alwaysask=alwaysask)
         if res:
