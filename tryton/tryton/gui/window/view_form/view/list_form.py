@@ -70,7 +70,7 @@ class ViewListForm(View):
         self._model = None
         self._view_forms = []
 
-    def display(self):
+    def display(self, force=False):
         if self._model is None or self._model.group is not self.group:
             self._view_forms = []
             self._model = ListBoxModel(self.group)
@@ -113,13 +113,15 @@ class ViewListForm(View):
         return [self.group[r.get_index()] for r in selected_rows]
 
     def group_list_changed(self, group, signal):
-        action = signal[0]
+        action, record, position, *_ = signal
+        # Only those actions have a record in the signal data
+        if (action not in {'record-added', 'record-removed'}
+                or self.group != record.group):
+            return
         if action == 'record-added':
-            position = signal[2]
             self._model.emit('items-changed', position, 0, 1)
             self._view_forms.insert(position, self._view_forms.pop())
         elif action == 'record-removed':
-            position = signal[2]
             self._model.emit('items-changed', position, 1, 0)
             self._view_forms.pop(position)
 
@@ -136,12 +138,11 @@ class ViewListForm(View):
 
     @common.idle_add
     def _select_show_row(self, index):
-        # translate_coordinates requires that both widgets are realized
         if not self.listbox.get_realized():
             return
         self.listbox.unselect_all()
         row = self.listbox.get_row_at_index(index)
-        if not row or not row.get_realized():
+        if not row:
             return
         self.listbox.select_row(row)
         y_position = row.translate_coordinates(self.listbox, 0, 0)[1]

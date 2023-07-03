@@ -13,13 +13,10 @@ _ = gettext.gettext
 
 def focusable_cells(column, editable=True):
     for cell in column.get_cells():
-        if (not editable
-                or (isinstance(cell, (
-                            Gtk.CellRendererText,
-                            Gtk.CellRendererCombo))
-                    and cell.get_property('editable'))
-                or (isinstance(cell, Gtk.CellRendererToggle)
-                    and cell.get_property('activatable'))):
+        if not editable or isinstance(cell, (
+                    Gtk.CellRendererText,
+                    Gtk.CellRendererCombo,
+                    Gtk.CellRendererToggle)):
             yield cell
 
 
@@ -80,6 +77,10 @@ class EditableTreeView(TreeView):
         Gdk.KEY_Up, Gdk.KEY_Down, Gdk.KEY_Return)
     leaving_events = leaving_record_events + (
         Gdk.KEY_Tab, Gdk.KEY_ISO_Left_Tab, Gdk.KEY_KP_Enter)
+
+    def __init__(self, view, editable_open=False):
+        super().__init__(view)
+        self.editable_open = editable_open
 
     def on_quit_cell(
             self, current_record, column, renderer, value, callback=None):
@@ -193,6 +194,9 @@ class EditableTreeView(TreeView):
                     model = entry.get_model()
                     index = entry.get_property('entry-text-column')
                     txt = model[active][index]
+                # It seems that the remove-widget signal is only sent when
+                # activating the combobox or when pressing escape.
+                GLib.idle_add(entry.emit, 'remove-widget')
             else:
                 return True
             keyval = event.keyval

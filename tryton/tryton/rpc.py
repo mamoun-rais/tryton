@@ -3,6 +3,7 @@
 import http.client
 import logging
 import socket
+import ssl
 import os
 try:
     from http import HTTPStatus
@@ -20,6 +21,11 @@ from tryton.config import CONFIG
 
 CONNECTION = None
 _USER = None
+_USERNAME = ''
+_HOST = ''
+_PORT = None
+_CLIENT_DATE = None
+_DATABASE = ''
 CONTEXT = {}
 _VIEW_CACHE = {}
 _TOOLBAR_CACHE = {}
@@ -66,20 +72,23 @@ def server_version(host, port):
         result = connection.common.server.version()
         logging.getLogger(__name__).debug(repr(result))
         return result
-    except Exception as e:
+    except (Fault, socket.error, ssl.SSLError, ssl.CertificateError) as e:
         logging.getLogger(__name__).error(e)
         return None
 
 
+# ABD: Add date and set_date parameters to login function (ca093423)
 def login(parameters):
     from tryton import common
     global CONNECTION, _USER
+    global _CLIENT_DATE
     host = CONFIG['login.host']
     hostname = common.get_hostname(host)
     port = common.get_port(host)
     database = CONFIG['login.db']
     username = CONFIG['login.login']
     language = CONFIG['client.lang']
+    date = CONFIG['login.date']
     connection = ServerProxy(hostname, port, database)
     logging.getLogger(__name__).info('common.db.login(%s, %s, %s)'
         % (username, 'x' * 10, language))
@@ -91,11 +100,13 @@ def login(parameters):
         CONNECTION.close()
     CONNECTION = ServerPool(
         hostname, port, database, session=session, cache=not CONFIG['dev'])
+    _CLIENT_DATE = date
     bus.listen(CONNECTION)
 
 
 def logout():
     global CONNECTION, _USER
+    global _CLIENT_DATE
     if CONNECTION is not None:
         try:
             logging.getLogger(__name__).info('common.db.logout()')
@@ -105,6 +116,7 @@ def logout():
             pass
         CONNECTION.close()
         CONNECTION = None
+    _CLIENT_DATE = None
     _USER = None
 
 

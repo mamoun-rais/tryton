@@ -1,8 +1,9 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import logging
 from tryton.signal_event import SignalEvent
-import tryton.common as common
 from tryton.pyson import PYSONDecoder
+import tryton.common as common
 from . import field as fields
 from tryton.common import RPCExecute, RPCException
 from tryton.config import CONFIG
@@ -10,7 +11,9 @@ from tryton.config import CONFIG
 
 class Record(SignalEvent):
 
-    id = -1
+    # JCA : Make sure we cannot have id conflicts in case of bugs on temporary
+    # ids being inverted
+    id = -100000000
 
     def __init__(self, model_name, obj_id, group=None):
         super(Record, self).__init__()
@@ -38,7 +41,7 @@ class Record(SignalEvent):
         self.destroyed = False
 
     def __getitem__(self, name):
-        if not self.destroyed and self.id >= 0 and name not in self._loaded:
+        if name not in self._loaded and self.id >= 0:
             id2record = {
                 self.id: self,
                 }
@@ -80,9 +83,7 @@ class Record(SignalEvent):
                 limit = int(CONFIG['client.limit'] / len(fnames))
 
                 def filter_group(record):
-                    return (not record.destroyed
-                        and record.id >= 0
-                        and name not in record._loaded)
+                    return name not in record._loaded and record.id >= 0
 
                 def filter_parent_group(record):
                     return (filter_group(record)
@@ -143,7 +144,23 @@ class Record(SignalEvent):
 
     @property
     def modified(self):
-        return bool(self.modified_fields)
+        result = bool(self.modified_fields)
+        if not result:
+            return result
+        # JCA #15014 Add a way to make sure some fields are always ignored when
+        # detecting whether the record needs saving
+        for field in self.modified_fields:
+            if field not in self.group.fields:
+                break
+            if not self.group.fields[field].attrs.get(
+                    'never_modified', False):
+                break
+        else:
+            return False
+        logging.getLogger('root').critical(
+            '%s : modified fields : %s' % (
+                self, list(self.modified_fields.keys())))
+        return result
 
     @property
     def parent(self):
@@ -173,20 +190,27 @@ class Record(SignalEvent):
         if value:
             self.signal('record-modified')
 
-    def children_group(self, field_name):
-        if not field_name:
-            return []
+    def children_group(self, field_name, children_definitions):
+        if field_name not in self.group.fields:
+            return None
         self._check_load([field_name])
         group = self.value.get(field_name)
         if group is None:
             return None
 
-        if id(group.fields) != id(self.group.fields):
-            self.group.fields.update(group.fields)
-            group.fields = self.group.fields
-        group.on_write = self.group.on_write
-        group.readonly = self.group.readonly
-        group._context.update(self.group._context)
+        if group.model_name == self.group.model_name:
+            if id(group.fields) != id(self.group.fields):
+                self.group.fields.update(group.fields)
+                group.fields = self.group.fields
+            group.on_write = self.group.on_write
+            group.readonly = self.group.readonly
+            group._context.update(self.group._context)
+        else:
+            fields = children_definitions[group.model_name].copy()
+            # Force every field of the multi-model to be eager-loaded
+            for field_def in fields.values():
+                field_def['loading'] = 'eager'
+            group.load_fields(fields)
         return group
 
     def get_path(self, group):
@@ -307,7 +331,7 @@ class Record(SignalEvent):
     def pre_validate(self):
         if not self.modified_fields:
             return True
-        values = self._get_on_change_args(['id'] + list(self.modified_fields))
+        values = self._get_on_change_args(self.modified_fields)
         try:
             RPCExecute('model', self.model_name, 'pre_validate', values,
                 context=self.get_context())
@@ -348,6 +372,7 @@ class Record(SignalEvent):
         return self.id
 
     def default_get(self, rec_name=None):
+        vals = None
         if len(self.group.fields):
             context = self.get_context()
             context.setdefault('default_rec_name', rec_name)

@@ -1,5 +1,6 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+"Options"
 import configparser
 import optparse
 import os
@@ -34,32 +35,37 @@ class ConfigManager(object):
     "Config manager"
 
     def __init__(self):
-        short_version = '.'.join(__version__.split('.', 2)[:2])
-        demo_server = 'demo%s.tryton.org' % short_version
-        demo_database = 'demo%s' % short_version
+        demo_server = 'coog'
+        demo_database = 'demo'
         self.defaults = {
             'login.profile': demo_server,
-            'login.login': 'demo',
+            'login.login': 'admin',
             'login.host': demo_server,
             'login.db': demo_database,
             'login.expanded': False,
-            'client.title': 'Tryton',
+            'login.date': False,
+            'tip.autostart': False,
+            'tip.position': 0,
+            'form.toolbar': True,
+            'client.title': 'Coog',
+            'client.default_width': 900,
+            'client.default_height': 750,
             'client.modepda': False,
             'client.toolbar': 'default',
             'client.save_tree_width': True,
-            'client.save_tree_state': True,
+            'client.save_tree_state': False,
             'client.spellcheck': False,
             'client.lang': locale.getdefaultlocale()[0],
             'client.language_direction': 'ltr',
             'client.email': '',
             'client.limit': 1000,
-            'client.check_version': True,
+            'client.check_version': False,
             'client.bus_timeout': 10 * 60,
-            'icon.colors': '#3465a4,#555753,#cc0000',
+            'icon.colors': '#0094d2,#57a639,#cc0000',
             'tree.colors': '#777,#dff0d8,#fcf8e3,#f2dede',
             'image.max_size': 10 ** 6,
-            'bug.url': 'https://bugs.tryton.org/',
-            'download.url': 'https://downloads-cdn.tryton.org/',
+            'bug.url': 'https://support.coopengo.com/',
+            'download.url': 'https://downloads.tryton.org/',
             'download.frequency': 60 * 60 * 8,
             'menu.pane': 200,
         }
@@ -68,7 +74,7 @@ class ConfigManager(object):
         self.arguments = []
 
     def parse(self):
-        parser = optparse.OptionParser(version=("Tryton %s" % __version__),
+        parser = optparse.OptionParser(version=("Coog %s" % __version__),
                 usage="Usage: %prog [options] [url]")
         parser.add_option("-c", "--config", dest="config",
                 help=_("specify alternate config file"))
@@ -156,8 +162,13 @@ class ConfigManager(object):
 
 
 CONFIG = ConfigManager()
-CURRENT_DIR = os.path.dirname(__file__)
-if hasattr(sys, 'frozen'):
+CURRENT_DIR = ''
+if not hasattr(sys, 'frozen'):
+    try:
+        CURRENT_DIR = os.path.dirname(__file__)
+    except Exception:
+        pass
+else:
     CURRENT_DIR = os.path.dirname(sys.executable)
 if not isinstance(CURRENT_DIR, str):
     CURRENT_DIR = str(CURRENT_DIR, sys.getfilesystemencoding())
