@@ -260,7 +260,7 @@ class User(metaclass=PoolMeta):
                             ('parent', 'child_of', [main_company_id]),
                             ])
                     company_id = Transaction().context['company']
-                    if ((company_id and company_id in map(int, companies))
+                    if ((company_id and company_id in list(map(int, companies)))
                             or not company_id
                             or Transaction().user == 0):
                         values['company'] = company_id
