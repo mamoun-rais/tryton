@@ -1,12 +1,15 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
+import string
 import warnings
 
-from sql.conditionals import Coalesce, NullIf
+from sql import Query, Expression
 from sql.operators import Not
+from sql.functions import Trim
 
 from trytond.rpc import RPC
 from trytond.tools import unescape_wildcard, is_full_text
+
 from trytond.transaction import Transaction
 from .field import Field, FieldTranslate, size_validate
 
@@ -24,7 +27,7 @@ class Char(FieldTranslate):
     def __init__(self, string='', size=None, help='', required=False,
             readonly=False, domain=None, states=None, translate=False,
             select=False, on_change=None, on_change_with=None, depends=None,
-            context=None, loading=None, autocomplete=None):
+            context=None, loading=None, autocomplete=None, strip=True):
         '''
         :param translate: A boolean. If ``True`` the field is translatable.
         :param size: A integer. If set defines the maximum size of the values.
@@ -40,6 +43,7 @@ class Char(FieldTranslate):
             warnings.warn('autocomplete argument is deprecated, use the '
                 'depends decorator', DeprecationWarning, stacklevel=2)
             self.autocomplete |= set(autocomplete)
+        self.strip = strip
         self.translate = translate
         self.__size = None
         self.size = size
@@ -57,6 +61,22 @@ class Char(FieldTranslate):
     @property
     def _sql_type(self):
         return 'VARCHAR(%s)' % self.size if self.size else 'VARCHAR'
+
+    def __set__(self, inst, value):
+        if value is not None and self.strip:
+            if isinstance(value, (Query, Expression)):
+                value = Trim(value, characters=string.whitespace)
+            else:
+                value = value.strip()
+        super().__set__(inst, value)
+
+    def sql_format(self, value):
+        if value is not None and self.strip:
+            if isinstance(value, (Query, Expression)):
+                value = Trim(value, characters=string.whitespace)
+            else:
+                value = value.strip()
+        return super().sql_format(value)
 
     def set_rpc(self, model):
         super(Char, self).set_rpc(model)
@@ -92,25 +112,21 @@ class Char(FieldTranslate):
                 language = transaction.language
                 model, join, column = self._get_translation_column(
                     Model, name)
-                column = Coalesce(NullIf(column, ''), self.sql_column(model))
             else:
                 language = None
                 column = self.sql_column(table)
             column = self._domain_column(operator, column)
 
-            threshold = context.get(
-                '%s.%s.search_similarity' % (Model.__name__, name),
-                context.get('search_similarity'))
-            if database.has_similarity() and is_full_text(value) and threshold:
+            if database.has_similarity() and is_full_text(value):
+                threshold = context.get(
+                    '%s.%s.search_similarity' % (Model.__name__, name),
+                    context.get('search_similarity', 0.3))
                 sim_value = unescape_wildcard(value)
                 sim_value = self._domain_value(operator, sim_value)
                 expression = (
                     database.similarity(column, sim_value) >= threshold)
                 if operator.startswith('not'):
                     expression = Not(expression)
-                if self.translate:
-                    expression = table.id.in_(
-                        join.select(model.id, where=expression))
 
             key = '%s.%s.search_full_text' % (Model.__name__, name)
             if ((self.search_full_text or context.get(key))
@@ -184,6 +200,7 @@ class Char(FieldTranslate):
     def definition(self, model, language):
         definition = super().definition(model, language)
         definition['autocomplete'] = list(self.autocomplete)
+        definition['strip'] = self.strip
         if self.size is not None:
             definition['size'] = self.size
         return definition

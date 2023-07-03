@@ -30,6 +30,7 @@ from sql.conditionals import Coalesce, Case
 from sql.aggregate import Count
 from sql.operators import Concat
 
+import trytond.security as security
 from passlib.context import CryptContext
 
 try:
@@ -330,6 +331,11 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
 
     @staticmethod
     def get_sessions(users, name):
+        # AKE: manage session on redis
+        if security.config_session_redis():
+            dbname = Pool().database_name
+            return {u.id: security.redis.count_sessions(dbname, u.id)
+                for u in users}
         Session = Pool().get('ir.session')
         now = datetime.datetime.now()
         timeout = datetime.timedelta(
@@ -361,28 +367,10 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
     @classmethod
     def read(cls, ids, fields_names):
         result = super(User, cls).read(ids, fields_names)
-        cache = Transaction().get_cache().get(cls.__name__)
-        for values in result:
-            if 'password_hash' in values:
+        if not fields_names or 'password_hash' in fields_names:
+            for values in result:
                 values['password_hash'] = None
-            if cache and values['id'] in cache:
-                cache[values['id']]['password_hash'] = None
         return result
-
-    @classmethod
-    def search(
-            cls, domain, offset=0, limit=None, order=None, count=False,
-            query=False):
-        users = super().search(
-            domain, offset=offset, limit=limit, order=order, count=count,
-            query=query)
-        if not count and not query:
-            cache = Transaction().get_cache().get(cls.__name__)
-            if cache is not None:
-                for user in users:
-                    if user.id in cache:
-                        cache[user.id]['password_hash'] = None
-        return users
 
     @classmethod
     def create(cls, vlist):
@@ -407,7 +395,7 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
             all_users += users
             args.extend((users, cls._convert_vals(values)))
 
-            if values.keys() & {'active', 'password'}:
+            if 'password' in values:
                 session_to_clear += users
                 users_to_clear += [u.login for u in users]
 
@@ -461,8 +449,7 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
             default = {}
         default = default.copy()
 
-        default['password_hash'] = None
-        default['password_reset'] = None
+        default['password'] = ''
         default.setdefault('warnings')
         default.setdefault('applications')
 
@@ -531,12 +518,15 @@ class User(avatar_mixin(100, 'login'), DeactivableMixin, ModelSQL, ModelView):
     def get_preferences(cls, context_only=False):
         key = (Transaction().user, context_only)
         preferences = cls._get_preferences_cache.get(key)
-        if preferences is not None:
-            return preferences.copy()
-        user = Transaction().user
-        user = cls(user)
-        preferences = cls._get_preferences(user, context_only=context_only)
-        cls._get_preferences_cache.set(key, preferences)
+        if preferences is None:
+            user = Transaction().user
+            user = cls(user)
+            preferences = cls._get_preferences(user, context_only=context_only)
+            cls._get_preferences_cache.set(key, preferences)
+        # AKE: add token information to get_preferences RPC
+        token = Transaction().context.get('token', None)
+        if token is not None:
+            preferences['token'] = token
         return preferences.copy()
 
     @classmethod

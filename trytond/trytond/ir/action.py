@@ -148,6 +148,7 @@ class ActionKeyword(ModelSQL, ModelView):
             ('form_print', 'Print form'),
             ('form_action', 'Action form'),
             ('form_relate', 'Form relate'),
+            ('form_toolbar', 'Form Toolbar'),
             ('graph_open', 'Open Graph'),
             ], string='Keyword', required=True)
     model = fields.Reference('Model', selection='models_get')
@@ -253,7 +254,7 @@ class ActionKeyword(ModelSQL, ModelView):
                 ('model', '=', None),
                 ],
             ]
-        if model_id >= 0:
+        if model_id is not None and model_id >= 0:
             clause = ['OR',
                 clause,
                 [
@@ -273,11 +274,9 @@ class ActionKeyword(ModelSQL, ModelView):
                 keywords.append(value)
         if keyword == 'tree_open' and model == Menu.__name__:
             menu = Menu(model_id)
-            for value in keywords:
-                if value['type'] == 'ir.action.act_window':
-                    if len(keywords) == 1:
-                        value['name'] = menu.name
-                    if menu.parent:
+            if menu.parent:
+                for value in keywords:
+                    if value['type'] == 'ir.action.act_window':
                         parent = menu.parent
                         if parent.name == value['name']:
                             parent = parent.parent

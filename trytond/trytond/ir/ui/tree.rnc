@@ -49,6 +49,7 @@ attlist.field &=
 attlist.field &= attribute visual { text }?
 attlist.field &= attribute icon { text }?
 attlist.field &= attribute sum { text }?
+attlist.field &= attribute highlight_sum { "0" | "1" }?
 attlist.field &= attribute width { text }?
 attlist.field &= attribute height { text }?
 attlist.field &=

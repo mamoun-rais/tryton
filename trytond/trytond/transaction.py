@@ -43,7 +43,8 @@ class Transaction(object):
 
     _local = _Local()
 
-    cache_keys = {'language', 'fuzzy_translation', '_datetime'}
+    cache_keys = {'language', 'fuzzy_translation', '_datetime',
+        '_datetime_exclude'}
 
     database = None
     readonly = False
@@ -88,7 +89,7 @@ class Transaction(object):
         return self.cache.setdefault((self.user, keys), LRUDict(_cache_model))
 
     def start(self, database_name, user, readonly=False, context=None,
-            close=False, autocommit=False):
+            close=False, autocommit=False, timeout=None):
         '''
         Start transaction
         '''
@@ -107,7 +108,7 @@ class Transaction(object):
             database = backend.Database(database_name).connect()
         Flavor.set(backend.Database.flavor)
         self.connection = database.get_connection(readonly=readonly,
-            autocommit=autocommit)
+            autocommit=autocommit, statement_timeout=timeout)
         self.user = user
         self.database = database
         self.readonly = readonly
@@ -120,6 +121,8 @@ class Transaction(object):
         self.timestamp = {}
         self.counter = 0
         self._datamanagers = []
+        self._sub_transactions = []
+        self._sub_transactions_to_close = []
         if database_name:
             from trytond.cache import Cache
             try:
@@ -150,6 +153,12 @@ class Transaction(object):
                     finally:
                         self.database.put_connection(
                             self.connection, self.close)
+                        to_put = {x.connection for x in
+                            self._sub_transactions_to_close
+                            if not x.connection.closed}
+                        for conn in to_put:
+                            self.database.put_connection(
+                                conn, self.close)
                 finally:
                     self.database = None
                     self.readonly = False
@@ -212,6 +221,16 @@ class Transaction(object):
             context=self.context, close=self.close, readonly=readonly,
             autocommit=autocommit)
 
+    def add_sub_transactions(self, sub_transactions):
+        self._sub_transactions.extend(sub_transactions)
+
+    def add_sub_transaction_to_close(self, sub_transaction):
+        # Needed by sub_transaction_retry Coog decorator
+        # We need to close connection that will not
+        # be committed to prevent depletion of
+        # the connection pool.
+        self._sub_transactions_to_close.append(sub_transaction)
+
     def commit(self):
         from trytond.cache import Cache
         try:
@@ -222,6 +241,13 @@ class Transaction(object):
                     datamanager.commit(self)
                 for datamanager in self._datamanagers:
                     datamanager.tpc_vote(self)
+            # ABD: Some datamanager may returns transactions which should
+            # be committed just before the main transaction
+            for sub_transaction in self._sub_transactions:
+                # Does not handle TPC or recursive transaction commit
+                # This just commits the sub transactions to avoid any crashes
+                # which could occur otherwise.
+                sub_transaction.connection.commit()
             self.started_at = self.monotonic_time()
             for cache in self.cache.values():
                 cache.clear()
@@ -243,6 +269,8 @@ class Transaction(object):
         from trytond.cache import Cache
         for cache in self.cache.values():
             cache.clear()
+        for sub_transaction in self._sub_transactions:
+            sub_transaction.rollback()
         for datamanager in self._datamanagers:
             datamanager.tpc_abort(self)
         Cache.rollback(self)

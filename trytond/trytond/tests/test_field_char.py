@@ -465,6 +465,87 @@ class FieldCharTestCase(unittest.TestCase, CommonTestCaseMixin):
                     'char': 'foobar',
                     })
 
+    @with_transaction()
+    def test_create_strip(self):
+        "Test create with stripping"
+        Char = Pool().get('test.char_strip')
+
+        char, = Char.create([{
+                    'char': " Foo ",
+                    'char_unstripped': " Foo ",
+                    }])
+
+        read_record = Char(char.id)
+        self.assertEqual(read_record.char, "Foo")
+        self.assertEqual(read_record.char_unstripped, " Foo ")
+
+    @with_transaction()
+    def test_create_strip_with_sql_value(self):
+        "Test create with stripping with SQL value"
+        Char = Pool().get('test.char_strip')
+
+        char, = Char.create([{
+                    'char': Literal(" Foo "),
+                    'char_unstripped': Literal(" Foo "),
+                    }])
+
+        read_record = Char(char.id)
+        self.assertEqual(read_record.char, "Foo")
+        self.assertEqual(read_record.char_unstripped, " Foo ")
+
+    @with_transaction()
+    def test_write_strip(self):
+        "Test write with stripping"
+        Char = Pool().get('test.char_strip')
+
+        char, = Char.create([{
+                    'char': "Foo",
+                    'char_unstripped': "Foo",
+                    }])
+
+        Char.write([char], {
+                'char': " Bar ",
+                'char_unstripped': " Bar ",
+                })
+        read_record = Char(char.id)
+        self.assertEqual(read_record.char, "Bar")
+        self.assertEqual(read_record.char_unstripped, " Bar ")
+
+    @with_transaction()
+    def test_write_strip_with_sql_value(self):
+        "Test write with stripping with SQL value"
+        Char = Pool().get('test.char_strip')
+
+        char, = Char.create([{
+                    'char': "Foo",
+                    'char_unstripped': "Foo",
+                    }])
+
+        Char.write([char], {
+                'char': Literal(" Bar "),
+                'char_unstripped': Literal(" Bar "),
+                })
+        read_record = Char(char.id)
+        self.assertEqual(read_record.char, "Bar")
+        self.assertEqual(read_record.char_unstripped, " Bar ")
+
+    @with_transaction()
+    def test_set_strip(self):
+        "Test set with stripping"
+        Char = Pool().get('test.char_strip')
+
+        char = Char()
+
+        char.char = " Foo "
+        char.char_unstripped = " Foo "
+        self.assertEqual(char.char, "Foo")
+        self.assertEqual(char.char_unstripped, " Foo ")
+
+        char.save()
+        read_record = Char(char.id)
+        self.assertEqual(read_record.char, "Foo")
+        self.assertEqual(read_record.char_unstripped, " Foo ")
+
 
 class FieldCharTranslatedTestCase(unittest.TestCase, CommonTestCaseMixin):
     "Test Field Char Translated"
@@ -586,31 +667,26 @@ class FieldCharSimilarityTestCase(ExtensionTestCase):
         activate_module('tests')
         super().setUpClass()
 
-    def _test_search(self, Model):
+    @with_transaction()
+    def test_search(self):
+        "Test search"
+        pool = Pool()
+        Model = pool.get('test.char')
         record1, record2 = Model.create([{
                     'char': "word",
                     }, {
                     'char': "Foo",
                     }])
 
-        with Transaction().set_context(search_similarity=0.3):
-            self.assertListEqual(Model.search([
-                        ('char', 'ilike', 'two words'),
-                        ]), [record1])
+        self.assertListEqual(Model.search([
+                    ('char', 'ilike', 'two words'),
+                    ]), [record1])
 
     @with_transaction()
-    def test_search(self):
-        "Test search"
+    def test_order(self):
+        "Test order"
         pool = Pool()
-        self._test_search(pool.get('test.char'))
-
-    @with_transaction()
-    def test_search_translated(self):
-        "Test search translated"
-        pool = Pool()
-        self._test_search(pool.get('test.char_translate'))
-
-    def _test_order(self, Model):
+        Model = pool.get('test.char')
         record1, record2 = Model.create([{
                     'char': "word",
                     }, {
@@ -622,18 +698,6 @@ class FieldCharSimilarityTestCase(ExtensionTestCase):
             self.assertListEqual(Model.search([
                         ], order=[('char', 'DESC')]),
                 [record2, record1])
-
-    @with_transaction()
-    def test_order(self):
-        "Test order"
-        pool = Pool()
-        self._test_order(pool.get('test.char'))
-
-    @with_transaction()
-    def test_order_translated(self):
-        "Test order translated"
-        pool = Pool()
-        self._test_order(pool.get('test.char_translate'))
 
 
 def suite():

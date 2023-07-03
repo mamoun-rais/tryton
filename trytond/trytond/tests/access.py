@@ -21,7 +21,6 @@ class TestAccessRelate(ModelSQL):
     "Test Access"
     __name__ = 'test.access.relate'
     value = fields.Integer("Value")
-    parent = fields.Many2One('test.access.relate', "Parent")
 
 
 class TestAccessModel(TestAccess):

@@ -6,7 +6,7 @@ from collections import OrderedDict, defaultdict
 from functools import wraps
 
 from sql import (Table, Column, Literal, Desc, Asc, Expression, Null,
-    NullsFirst, NullsLast, For)
+    NullsFirst, NullsLast, For, Union)
 from sql.functions import CurrentTimestamp, Extract
 from sql.conditionals import Coalesce
 from sql.operators import Or, And, Operator, Equal
@@ -276,8 +276,9 @@ class ModelSQL(ModelStorage):
                 elif ref:
                     table.add_fk(field_name, ref, field.ondelete)
 
-            table.index_action(
-                field_name, action=field.select and 'add' or 'remove')
+            # Do not remove previously set indexes
+            if field.select:
+                table.index_action(field_name, action='add')
 
             required = field.required
             # Do not set 'NOT NULL' for Binary field as the database column
@@ -308,20 +309,20 @@ class ModelSQL(ModelStorage):
 
         if cls._history:
             cls._update_history_table()
-            h_table = cls.__table_history__()
+            history_table = cls.__table_history__()
             cursor.execute(*sql_table.select(sql_table.id, limit=1))
             if cursor.fetchone():
                 cursor.execute(
-                    *h_table.select(h_table.id, limit=1))
+                    *history_table.select(history_table.id, limit=1))
                 if not cursor.fetchone():
                     columns = [n for n, f in cls._fields.items()
                         if f.sql_type()]
-                    cursor.execute(*h_table.insert(
-                            [Column(h_table, c) for c in columns],
+                    cursor.execute(*history_table.insert(
+                            [Column(history_table, c) for c in columns],
                             sql_table.select(*(Column(sql_table, c)
                                     for c in columns))))
-                    cursor.execute(*h_table.update(
-                            [h_table.write_date], [None]))
+                    cursor.execute(*history_table.update(
+                            [history_table.write_date], [None]))
 
     @classmethod
     def _update_history_table(cls):
@@ -459,6 +460,14 @@ class ModelSQL(ModelStorage):
         cursor = transaction.connection.cursor()
         table = cls.__table__()
         history = cls.__table_history__()
+
+        transaction.counter += 1
+        for cache in transaction.cache.values():
+            if cls.__name__ in cache:
+                cache_cls = cache[cls.__name__]
+                for id_ in ids:
+                    cache_cls.pop(id_, None)
+
         columns = []
         hcolumns = []
         fnames = sorted(n for n, f in cls._fields.items()
@@ -698,14 +707,15 @@ class ModelSQL(ModelStorage):
 
         fields_related = defaultdict(set)
         extra_fields = set()
-        if 'write_date' not in fields_names:
-            extra_fields.add('write_date')
         for field_name in fields_names:
             if field_name in {'_timestamp', '_write', '_delete'}:
                 continue
             if '.' in field_name:
                 field_name, field_related = field_name.split('.', 1)
                 fields_related[field_name].add(field_related)
+            if field_name.endswith(':string'):
+                field_name = field_name[:-len(':string')]
+                fields_related[field_name]
             field = cls._fields[field_name]
             if hasattr(field, 'datetime_field') and field.datetime_field:
                 extra_fields.add(field.datetime_field)
@@ -728,7 +738,10 @@ class ModelSQL(ModelStorage):
             in_max = 1
             table = cls.__table_history__()
             column = Coalesce(table.write_date, table.create_date)
-            history_clause = (column <= Transaction().context['_datetime'])
+            if Transaction().context.get('_datetime_exclude', False):
+                history_clause = (column < Transaction().context['_datetime'])
+            else:
+                history_clause = (column <= Transaction().context['_datetime'])
             history_order = (column.desc, Column(table, '__id').desc)
             history_limit = 1
 
@@ -743,10 +756,7 @@ class ModelSQL(ModelStorage):
                 if not callable(cls.table_query):
                     rule_domain = Rule.domain_get(
                         cls.__name__, mode=f.lstrip('_'))
-                    # No need to compute rule domain if it is the same as the
-                    # read rule domain because it is already applied as where
-                    # clause.
-                    if rule_domain and rule_domain != domain:
+                    if rule_domain:
                         rule_tables = {None: (table, None)}
                         rule_tables, rule_expression = cls.search_domain(
                             rule_domain, active_test=False, tables=rule_tables)
@@ -768,6 +778,14 @@ class ModelSQL(ModelStorage):
                         Coalesce(table.write_date, table.create_date)
                         ).cast(sql_type).as_('_timestamp'))
 
+        # JCA: prefix for https://support.coopengo.com/issues/20678
+        if 'write_date' not in all_fields and len(columns) > 0:
+            f = 'write_date'
+            field = cls._fields.get(f)
+            if field and field.sql_type():
+                columns.append(field.sql_column(table).as_(f))
+                if backend.name == 'sqlite':
+                    columns[-1].output_name += ' [%s]' % field.sql_type().base
         if len(columns):
             if 'id' not in fields_names:
                 columns.append(table.id.as_('id'))
@@ -822,9 +840,9 @@ class ModelSQL(ModelStorage):
         getter_fields = [f for f in all_fields
             if f in cls._fields and hasattr(cls._fields[f], 'get')]
 
+        cache = transaction.get_cache().setdefault(
+            cls.__name__, LRUDict(cache_size(), cls._record))
         if getter_fields and cachable_fields:
-            cache = transaction.get_cache().setdefault(
-                cls.__name__, LRUDict(cache_size(), cls._record))
             for row in result:
                 for fname in cachable_fields:
                     cache[row['id']][fname] = row[fname]
@@ -849,6 +867,7 @@ class ModelSQL(ModelStorage):
                 for row in result:
                     row[fname] = getter_result[row['id']]
 
+        transaction = Transaction()
         for key in func_fields:
             field_list = func_fields[key]
             fname = field_list[0]
@@ -866,13 +885,25 @@ class ModelSQL(ModelStorage):
             else:
                 for sub_results in grouped_slice(result, cache_size()):
                     sub_results = list(sub_results)
-                    sub_ids = [r['id'] for r in sub_results]
-                    getter_results = field.get(
-                        sub_ids, cls, field_list, values=sub_results)
-                    for fname in field_list:
-                        getter_result = getter_results[fname]
-                        for row in sub_results:
-                            row[fname] = getter_result[row['id']]
+                    sub_ids = []
+                    for row in sub_results:
+                        if (row['id'] not in cache
+                                or any(f not in cache[row['id']]
+                                    for f in field_list)):
+                            sub_ids.append(row['id'])
+                        else:
+                            for fname in field_list:
+                                row[fname] = cache[row['id']][fname]
+                    if sub_ids:
+                        getter_results = field.get(
+                            sub_ids, cls, field_list, values=sub_results)
+                        for fname in field_list:
+                            getter_result = getter_results[fname]
+                            for row in sub_results:
+                                if row['id'] in sub_ids:
+                                    row[fname] = getter_result[row['id']]
+                                    if transaction.readonly:
+                                        cache[row['id']][fname] = row[fname]
 
         def read_related(field, Target, rows, fields):
             name = field.name
@@ -881,13 +912,9 @@ class ModelSQL(ModelStorage):
                 add = target_ids.extend
             elif field._type == 'reference':
                 def add(value):
-                    try:
-                        id_ = int(value.split(',', 1)[1])
-                    except ValueError:
-                        pass
-                    else:
-                        if id_ >= 0:
-                            target_ids.append(id_)
+                    id_ = int(value.split(',', 1)[1])
+                    if id_ >= 0:
+                        target_ids.append(id_)
             else:
                 add = target_ids.append
             for row in rows:
@@ -898,21 +925,29 @@ class ModelSQL(ModelStorage):
 
         def add_related(field, rows, targets):
             name = field.name
-            key = name + '.'
+            key = name + (':string' if field._type == 'selection' else '.')
             if field._type.endswith('2many'):
                 for row in rows:
                     row[key] = values = list()
                     for target in row[name]:
                         if target is not None:
                             values.append(targets[target])
+            elif field._type == 'selection':
+                for row in rows:
+                    selection = fields.Selection.get_selection(
+                            cls, name, cls(row['id']))
+                    value = row[name]
+                    if value is None or value == '':
+                        if value not in selection:
+                            switch_value = {None: '', '': None}[value]
+                            if switch_value in selection:
+                                value = switch_value
+                    row[key] = selection[value]
             else:
                 for row in rows:
                     value = row[name]
                     if isinstance(value, str):
-                        try:
-                            value = int(value.split(',', 1)[1])
-                        except ValueError:
-                            value = None
+                        value = int(value.split(',', 1)[1])
                     if value is not None and value >= 0:
                         row[key] = targets[value]
                     else:
@@ -936,7 +971,9 @@ class ModelSQL(ModelStorage):
                     ctx.update(PYSONDecoder(row).decode(pyson_context))
                 if datetime_field:
                     ctx['_datetime'] = row.get(datetime_field)
-                if field._type == 'reference':
+                if field._type == 'selection':
+                    Target = None
+                elif field._type == 'reference':
                     value = row[fname]
                     if not value:
                         Target = None
@@ -1129,14 +1166,11 @@ class ModelSQL(ModelStorage):
                     Column(foreign_table, field_name), sub_ids)
                 cursor.execute(*foreign_table.select(foreign_table.id,
                         where=foreign_red_sql))
-                related_records = Model.browse([x[0] for x in cursor])
+                records = Model.browse([x[0] for x in cursor])
             else:
                 with transaction.set_context(active_test=False):
-                    related_records = Model.search(
-                        [(field_name, 'in', sub_ids)])
-            if Model == cls:
-                related_records = list(set(related_records) - set(records))
-            return related_records
+                    records = Model.search([(field_name, 'in', sub_ids)])
+            return records
 
         for sub_ids, sub_records in zip(
                 grouped_slice(ids), grouped_slice(records)):
@@ -1150,10 +1184,9 @@ class ModelSQL(ModelStorage):
                 if (not hasattr(Model, 'search')
                         or not hasattr(Model, 'write')):
                     continue
-                related_records = get_related_records(
-                    Model, field_name, sub_ids)
-                if related_records:
-                    Model.write(related_records, {
+                records = get_related_records(Model, field_name, sub_ids)
+                if records:
+                    Model.write(records, {
                             field_name: None,
                             })
 
@@ -1161,14 +1194,12 @@ class ModelSQL(ModelStorage):
                 if (not hasattr(Model, 'search')
                         or not hasattr(Model, 'delete')):
                     continue
-                related_records = get_related_records(
-                    Model, field_name, sub_ids)
-                if related_records:
-                    Model.delete(related_records)
+                records = get_related_records(Model, field_name, sub_ids)
+                if records:
+                    Model.delete(records)
 
             for Model, field_name in foreign_keys_tocheck:
-                with Transaction().set_context(
-                        _check_access=False, active_test=False):
+                with Transaction().set_context(_check_access=False):
                     if Model.search([
                                 (field_name, 'in', sub_ids),
                                 ], order=[]):
@@ -1275,20 +1306,115 @@ class ModelSQL(ModelStorage):
             raise AccessError(msg)
 
     @classmethod
-    def search(cls, domain, offset=0, limit=None, order=None, count=False,
-            query=False):
+    def __search_query(cls, domain, count, query, order):
         pool = Pool()
         Rule = pool.get('ir.rule')
-        transaction = Transaction()
-        cursor = transaction.connection.cursor()
 
-        super(ModelSQL, cls).search(
-            domain, offset=offset, limit=limit, order=order, count=count)
+        rule_domain = Rule.domain_get(cls.__name__, mode='read')
+        joined_domains = None
+        if domain and domain[0] == 'OR':
+            local_domains, subquery_domains = split_subquery_domain(domain)
+            if local_domains:
+                local_domains = [['OR'] + local_domains]
+            if subquery_domains:
+                joined_domains = subquery_domains
+                if local_domains:
+                    local_domains.insert(0, 'OR')
+                    joined_domains.append(local_domains)
 
-        # Get domain clauses
-        tables, expression = cls.search_domain(domain)
+        def get_local_columns(order_exprs):
+            local_columns = []
+            for order_expr in order_exprs:
+                if (isinstance(order_expr, Column)
+                        and isinstance(order_expr._from, Table)
+                        and order_expr._from._name == cls._table):
+                    local_columns.append(order_expr._name)
+                else:
+                    raise NotImplementedError
+            return local_columns
 
-        # Get order by
+        # The UNION optimization needs the columns used to order the query
+        extra_columns = set()
+        if order and joined_domains:
+            tables = {
+                None: (cls.__table__(), None),
+                }
+            for oexpr, otype in order:
+                fname = oexpr.partition('.')[0]
+                field = cls._fields[fname]
+                field_orders = field.convert_order(oexpr, tables, cls)
+                try:
+                    order_columns = get_local_columns(field_orders)
+                    extra_columns.update(order_columns)
+                except NotImplementedError:
+                    joined_domains = None
+                    break
+
+        # In case the search uses subqueries it's more efficient to use a UNION
+        # of queries than using clauses with some JOIN because databases can
+        # used indexes
+        if joined_domains is not None:
+            union_tables = []
+            for sub_domain in joined_domains:
+                tables, expression = cls.search_domain(sub_domain)
+                if rule_domain:
+                    tables, domain_exp = cls.search_domain(
+                        rule_domain, active_test=False, tables=tables)
+                    expression &= domain_exp
+                main_table, _ = tables[None]
+                table = convert_from(None, tables)
+                columns = cls.__searched_columns(main_table,
+                    eager=not count and not query,
+                    extra_columns=extra_columns)
+                union_tables.append(table.select(
+                        *columns, where=expression))
+            expression = None
+            tables = {
+                None: (Union(*union_tables, all_=False), None),
+                }
+        else:
+            tables, expression = cls.search_domain(domain)
+            if rule_domain:
+                tables, domain_exp = cls.search_domain(
+                    rule_domain, active_test=False, tables=tables)
+                expression &= domain_exp
+
+        return tables, expression
+
+    @classmethod
+    def __searched_columns(
+            cls, table, *, eager=False, history=False, extra_columns=None):
+        if extra_columns is None:
+            extra_columns = []
+        else:
+            extra_columns = sorted(extra_columns - {'id', '__id', '_datetime'})
+        columns = [table.id.as_('id')]
+        if (cls._history and Transaction().context.get('_datetime')
+                and (eager or history)):
+            columns.append(
+                Coalesce(table.write_date, table.create_date).as_('_datetime'))
+            columns.append(Column(table, '__id').as_('__id'))
+        for column_name in extra_columns:
+            field = cls._fields[column_name]
+            sql_column = field.sql_column(table).as_(column_name)
+            columns.append(sql_column)
+        if eager:
+            columns += [f.sql_column(table).as_(n)
+                for n, f in sorted(cls._fields.items())
+                if not hasattr(f, 'get')
+                    and n not in extra_columns
+                    and n != 'id'
+                    and not getattr(f, 'translate', False)
+                    and f.loading == 'eager']
+            if not callable(cls.table_query):
+                sql_type = fields.Char('timestamp').sql_type().base
+                columns += [Extract('EPOCH',
+                        Coalesce(table.write_date, table.create_date)
+                        ).cast(sql_type).as_('_timestamp')]
+        return columns
+
+    @classmethod
+    def __search_order(cls, order, tables):
         order_by = []
         order_types = {
             'DESC': Desc,
@@ -1299,8 +1425,6 @@ class ModelSQL(ModelStorage):
             'NULLS LAST': NullsLast,
             None: lambda _: _
             }
-        if order is None or order is False:
-            order = cls._order
         for oexpr, otype in order:
             fname, _, extra_expr = oexpr.partition('.')
             field = cls._fields[fname]
@@ -1317,42 +1441,44 @@ class ModelSQL(ModelStorage):
             forder = field.convert_order(oexpr, tables, cls)
             order_by.extend((NullOrdering(Order(o)) for o in forder))
 
-        # construct a clause for the rules :
-        domain = Rule.domain_get(cls.__name__, mode='read')
-        if domain:
-            tables, dom_exp = cls.search_domain(
-                domain, active_test=False, tables=tables)
-            expression &= dom_exp
+        return order_by
+
+    @classmethod
+    def search(cls, domain, offset=0, limit=None, order=None, count=False,
+            query=False):
+        transaction = Transaction()
+        cursor = transaction.connection.cursor()
+
+        super(ModelSQL, cls).search(
+            domain, offset=offset, limit=limit, order=order, count=count)
+
+        if order is None or order is False:
+            order = cls._order
+        tables, expression = cls.__search_query(domain, count, query, order)
 
         main_table, _ = tables[None]
-        table = convert_from(None, tables)
-
         if count:
-            cursor.execute(*table.select(Count(Literal('*')),
-                    where=expression, limit=limit, offset=offset))
-            return cursor.fetchone()[0]
-        # execute the "main" query to fetch the ids we were searching for
-        columns = [main_table.id.as_('id')]
-        if (cls._history and transaction.context.get('_datetime')
-                and not query):
-            columns.append(Coalesce(
-                    main_table.write_date,
-                    main_table.create_date).as_('_datetime'))
-            columns.append(Column(main_table, '__id').as_('__id'))
-        if not query:
-            columns += [f.sql_column(main_table).as_(n)
-                for n, f in cls._fields.items()
-                if not hasattr(f, 'get')
-                and n != 'id'
-                and not getattr(f, 'translate', False)
-                and f.loading == 'eager']
-            if not callable(cls.table_query):
-                sql_type = fields.Char('timestamp').sql_type().base
-                columns += [Extract('EPOCH',
-                        Coalesce(main_table.write_date, main_table.create_date)
-                        ).cast(sql_type).as_('_timestamp')]
-        select = table.select(*columns,
-            where=expression, order_by=order_by, limit=limit, offset=offset)
+            table = convert_from(None, tables)
+            if (limit is not None and limit < cls.count()) or offset:
+                select = table.select(
+                    Literal(1), where=expression, limit=limit, offset=offset
+                    ).select(Count(Literal('*')))
+            else:
+                select = table.select(Count(Literal('*')), where=expression)
+            if query:
+                return select
+            else:
+                cursor.execute(*select)
+                return cursor.fetchone()[0]
+
+        order_by = cls.__search_order(order, tables)
+        # compute it here because __search_order might modify tables
+        table = convert_from(None, tables)
+        columns = cls.__searched_columns(main_table, eager=not query)
+        select = table.select(
+            *columns, where=expression, limit=limit, offset=offset,
+            order_by=order_by)
+
         if query:
             return select
         cursor.execute(*select)
@@ -1381,6 +1507,12 @@ class ModelSQL(ModelStorage):
 
             to_delete = set()
             history = cls.__table_history__()
+            if transaction.context.get('_datetime_exclude', False):
+                history_clause = (
+                    history.write_date < transaction.context['_datetime'])
+            else:
+                history_clause = (
+                    history.write_date <= transaction.context['_datetime'])
             for sub_ids in grouped_slice([r['id'] for r in rows]):
                 where = reduce_ids(history.id, sub_ids)
                 cursor.execute(*history.select(
@@ -1389,8 +1521,7 @@ class ModelSQL(ModelStorage):
                         where=where
                         & (history.write_date != Null)
                         & (history.create_date == Null)
-                        & (history.write_date
-                            <= transaction.context['_datetime'])))
+                        & history_clause))
                 for deleted_id, delete_date in cursor:
                     history_date, _ = ids_history[deleted_id]
                     if isinstance(history_date, str):
@@ -1426,12 +1557,7 @@ class ModelSQL(ModelStorage):
                 cache[cls.__name__][data['id']]._update(data)
 
         if len(rows) >= transaction.database.IN_MAX:
-            if (cls._history
-                    and transaction.context.get('_datetime')
-                    and not query):
-                columns = columns[:3]
-            else:
-                columns = columns[:1]
+            columns = cls.__searched_columns(main_table, history=True)
             cursor.execute(*table.select(*columns,
                     where=expression, order_by=order_by,
                     limit=limit, offset=offset))
@@ -1477,8 +1603,11 @@ class ModelSQL(ModelStorage):
 
         if cls._history and transaction.context.get('_datetime'):
             table, _ = tables[None]
-            expression &= (Coalesce(table.write_date, table.create_date)
-                <= transaction.context['_datetime'])
+            hcolumn = Coalesce(table.write_date, table.create_date)
+            if transaction.context.get('_datetime_exclude', False):
+                expression &= (hcolumn < transaction.context['_datetime'])
+            else:
+                expression &= (hcolumn <= transaction.context['_datetime'])
         return tables, expression
 
     @classmethod
@@ -1505,7 +1634,7 @@ class ModelSQL(ModelStorage):
                     limit=1))
             nested_create = cursor.fetchone()
 
-            if not nested_create and len(ids) < 2:
+            if not nested_create and len(ids) < max(cls.count() / 4, 4):
                 for id_ in ids:
                     cls._update_tree(id_, field_name,
                         field.left, field.right)
@@ -1676,3 +1805,30 @@ def convert_from(table, tables):
             continue
         table = convert_from(table, sub_tables)
     return table
+
+
+def split_subquery_domain(domain):
+    """
+    Split a domain in two parts:
+        - the first one contains all the sub-domains with only local fields
+        - the second one contains all the sub-domains using a related field
+    The main operator of the domain will be stripped from the results.
+    """
+    local_domains, subquery_domains = [], []
+    for sub_domain in domain:
+        if is_leaf(sub_domain):
+            if '.' in sub_domain[0]:
+                subquery_domains.append(sub_domain)
+            else:
+                local_domains.append(sub_domain)
+        elif (not sub_domain or list(sub_domain) in [['OR'], ['AND']]
+                or sub_domain in ['OR', 'AND']):
+            continue
+        else:
+            sub_ldomains, sub_sqdomains = split_subquery_domain(sub_domain)
+            if sub_sqdomains:
+                subquery_domains.append(sub_domain)
+            else:
+                local_domains.append(sub_domain)
+
+    return local_domains, subquery_domains

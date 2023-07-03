@@ -85,7 +85,7 @@ class Email(ResourceAccessMixin, ModelSQL, ModelView):
         cls._order.insert(0, ('create_date', 'DESC'))
         cls.__rpc__.update({
                 'send': RPC(readonly=False, result=int),
-                'complete': RPC(check_access=False),
+                'complete': RPC(),
                 })
         del cls.__rpc__['create']
 
@@ -211,17 +211,11 @@ class Email(ResourceAccessMixin, ModelSQL, ModelView):
         if not name and not email:
             return []
         s = StringMatcher()
-        try:
-            s.set_seq2(_formataddr((name, email)))
-        except UnicodeEncodeError:
-            return []
+        s.set_seq2(_formataddr((name, email)))
 
         def generate(name, email):
             for name, email in cls._match(name, email):
-                try:
-                    address = _formataddr((name, email))
-                except UnicodeEncodeError:
-                    continue
+                address = _formataddr((name, email))
                 s.set_seq1(address)
                 yield (
                     s.ratio(), address,
@@ -262,10 +256,13 @@ class EmailTemplate(ModelSQL, ModelView):
     name = fields.Char("Name", required=True, translate=True)
     recipients = fields.Many2One(
         'ir.model.field', "Recipients",
+        domain=[
+            ('model', '=', Eval('model')),
+            ],
         states={
             'invisible': Bool(Eval('recipients_pyson')),
             },
-        depends=['recipients_pyson'],
+        depends=['model', 'recipients_pyson'],
         help="The field that contains the recipient(s).")
     recipients_pyson = fields.Char(
         "Recipients",
@@ -277,10 +274,13 @@ class EmailTemplate(ModelSQL, ModelView):
         'with the record represented by "self".')
     recipients_secondary = fields.Many2One(
         'ir.model.field', "Secondary Recipients",
+        domain=[
+            ('model', '=', Eval('model')),
+            ],
         states={
             'invisible': Bool(Eval('recipients_secondary_pyson')),
             },
-        depends=['recipients_secondary_pyson'],
+        depends=['model', 'recipients_secondary_pyson'],
         help="The field that contains the secondary recipient(s).")
     recipients_secondary_pyson = fields.Char(
         "Secondary Recipients",
@@ -292,10 +292,13 @@ class EmailTemplate(ModelSQL, ModelView):
         'of secondary recipients with the record represented by "self".')
     recipients_hidden = fields.Many2One(
         'ir.model.field', "Hidden Recipients",
+        domain=[
+            ('model', '=', Eval('model')),
+            ],
         states={
             'invisible': Bool(Eval('recipients_hidden_pyson')),
             },
-        depends=['recipients_hidden_pyson'],
+        depends=['model', 'recipients_hidden_pyson'],
         help="The field that contains the secondary recipient(s).")
     recipients_hidden_pyson = fields.Char(
         "Hidden Recipients",
@@ -327,17 +330,13 @@ class EmailTemplate(ModelSQL, ModelView):
                 'recipients_hidden',
                 ]:
             field = getattr(cls, field)
-            field.domain = [
-                ('model', '=', Eval('model')),
-                ['OR',
+            field.domain.append(['OR',
                     ('relation', 'in', cls.email_models()),
                     [
                         ('model.model', 'in', cls.email_models()),
                         ('name', '=', 'id'),
                         ],
-                    ]
-                ]
-            field.depends.append('model')
+                    ])
         cls.__rpc__.update({
                 'get': RPC(instantiate=0),
                 'get_default': RPC(),

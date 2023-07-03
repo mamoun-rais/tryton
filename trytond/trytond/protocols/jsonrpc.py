@@ -5,10 +5,20 @@ from decimal import Decimal
 import json
 import base64
 
+try:
+    from werkzeug.datastructures import Headers
+except ImportError:
+    from werkzeug.wrappers import Headers
 from werkzeug.wrappers import Response
 from werkzeug.exceptions import (
     BadRequest, InternalServerError, Conflict, Forbidden, Locked,
     TooManyRequests)
+
+# AKE: log RPC method (uwsgi and header)
+try:
+    import uwsgi
+except ImportError:
+    uwsgi = None
 
 from trytond.protocols.wrappers import Request
 from trytond.exceptions import (
@@ -187,6 +197,13 @@ class JSONProtocol:
             elif isinstance(data, Exception):
                 return InternalServerError(data)
             response = data
+
+        # AKE: log RPC method (uwsgi and header)
+        if uwsgi:
+            uwsgi.set_logvar(b'rpc', parsed_data['method'].encode('utf-8'))
+        headers = Headers()
+        headers.add('RPC-Method', parsed_data['method'])
+
         return Response(json.dumps(
                 response, cls=JSONEncoder, separators=(',', ':')),
-            content_type='application/json')
+            content_type='application/json', headers=headers)

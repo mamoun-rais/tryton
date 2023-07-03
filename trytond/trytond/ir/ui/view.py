@@ -3,6 +3,7 @@
 import os
 import json
 
+from functools import lru_cache
 from lxml import etree
 
 from trytond.i18n import gettext
@@ -13,8 +14,8 @@ from trytond.tools import file_open
 from trytond.transaction import Transaction
 from trytond.wizard import Wizard, StateView, Button
 from trytond.pool import Pool
-from trytond.cache import Cache
 from trytond.rpc import RPC
+from trytond.cache import MemoryCache
 
 
 class XMLError(ValidationError):
@@ -63,7 +64,8 @@ class View(ModelSQL, ModelView):
     domain = fields.Char('Domain', states={
             'invisible': ~Eval('inherit'),
             }, depends=['inherit'])
-    _get_rng_cache = Cache('ir_ui_view.get_rng')
+    # AKE : Force usage of MemoryCache for non serializable data
+    _get_rng_cache = MemoryCache('ir_ui_view.get_rng')
 
     @classmethod
     def __setup__(cls):
@@ -95,6 +97,7 @@ class View(ModelSQL, ModelView):
         pass
 
     @classmethod
+    @lru_cache(maxsize=10)
     def get_rng(cls, type_):
         key = (cls.__name__, type_)
         rng = cls._get_rng_cache.get(key)
@@ -127,7 +130,20 @@ class View(ModelSQL, ModelView):
             xml = view.arch.strip()
             if not xml:
                 continue
-            tree = etree.fromstring(xml)
+            try:
+                try:
+                    encoded = xml.encode('utf-8')
+                except UnicodeEncodeError:
+                    encoded = xml
+                tree = etree.fromstring(encoded)
+            except Exception:
+                # JCA : print faulty xml
+                try:
+                    import pprint
+                    pprint.pprint(xml)
+                except:
+                    print(xml)
+                raise
 
             if hasattr(etree, 'RelaxNG'):
                 validator = etree.RelaxNG(etree=cls.get_rng(view.rng_type))
@@ -145,7 +161,7 @@ class View(ModelSQL, ModelView):
             }
 
             def encode(element):
-                for attr in ('states', 'domain', 'spell'):
+                for attr in ('states', 'domain', 'spell', 'colors'):
                     if not element.get(attr):
                         continue
                     try:

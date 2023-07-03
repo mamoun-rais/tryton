@@ -7,4 +7,4 @@ class Cache(ModelSQL):
     "Cache"
     __name__ = 'ir.cache'
     name = fields.Char('Name', required=True)
-    timestamp = fields.Timestamp("Timestamp")
+    timestamp = fields.DateTime('Timestamp')

@@ -21,22 +21,19 @@ logger = logging.getLogger(__name__)
 
 
 class Queue(object):
-    def __init__(self, database_name, mpool):
-        self.database = backend.Database(database_name).connect()
+    def __init__(self, pool, mpool):
+        self.database = backend.Database(pool.database_name).connect()
         self.connection = self.database.get_connection(autocommit=True)
+        self.pool = pool
         self.mpool = mpool
 
     def pull(self, name=None):
-        database_list = Pool.database_list()
-        pool = Pool(self.database.name)
-        if self.database.name not in database_list:
-            with Transaction().start(self.database.name, 0, readonly=True):
-                pool.init()
-        Queue = pool.get('ir.queue')
+        Queue = self.pool.get('ir.queue')
         return Queue.pull(self.database, self.connection, name=name)
 
     def run(self, task_id):
-        return self.mpool.apply_async(run_task, (self.database.name, task_id))
+        return self.mpool.apply_async(
+            run_task, (self.pool.database_name, task_id))
 
 
 class TaskList(list):
@@ -57,20 +54,19 @@ def work(options):
         processes = 1
     logger.info("start %d workers", processes)
     mpool = MPool(
-        processes, initializer, (options.database_names,),
-        options.maxtasksperchild)
-    queues = [Queue(name, mpool) for name in options.database_names]
+        processes, initializer, (options,), options.maxtasksperchild)
+    queues = [Queue(pool, mpool) for pool in initializer(options, False)]
 
     tasks = TaskList()
+    timeout = options.timeout
     try:
         while True:
-            timeout = options.timeout
             while len(tasks.filter()) >= processes:
                 time.sleep(0.1)
             for queue in queues:
                 task_id, next_ = queue.pull(options.name)
-                if next_ is not None:
-                    timeout = min(next_, timeout)
+                timeout = min(
+                    next_ or options.timeout, timeout, options.timeout)
                 if task_id:
                     tasks.append(queue.run(task_id))
                     break
@@ -85,12 +81,12 @@ def work(options):
         mpool.close()
 
 
-def initializer(database_names, worker=True):
+def initializer(options, worker=True):
     if worker:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
     pools = []
     database_list = Pool.database_list()
-    for database_name in database_names:
+    for database_name in options.database_names:
         pool = Pool(database_name)
         if database_name not in database_list:
             with Transaction().start(database_name, 0, readonly=True):
@@ -101,11 +97,7 @@ def initializer(database_names, worker=True):
 
 def run_task(pool, task_id):
     if not isinstance(pool, Pool):
-        database_list = Pool.database_list()
         pool = Pool(pool)
-        if pool.database_name not in database_list:
-            with Transaction().start(pool.database_name, 0, readonly=True):
-                pool.init()
     Queue = pool.get('ir.queue')
     name = '<Task %s@%s>' % (task_id, pool.database_name)
     logger.info('%s started', name)

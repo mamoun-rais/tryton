@@ -6,7 +6,7 @@ import json
 import unittest
 
 from werkzeug.test import Client
-from werkzeug.wrappers import Response
+from werkzeug.wrappers import BaseResponse
 
 from trytond.pool import Pool
 from trytond.tests.test_tryton import activate_module, DB_NAME, drop_db
@@ -35,8 +35,7 @@ class RoutesTestCase(unittest.TestCase):
     @property
     def auth_headers(self):
         return {
-            'Authorization': (
-                'Basic ' + base64.b64encode(b'admin:password').decode()),
+            'Authorization': b'Basic ' + base64.b64encode(b'admin:password'),
             }
 
     def data_url(self, model):
@@ -47,7 +46,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_no_field(self):
         "Test GET data without field"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(self.data_url('res.user'), headers=self.auth_headers)
 
@@ -56,7 +55,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_one_field(self):
         "Test GET data with one field"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('res.user'), headers=self.auth_headers,
@@ -67,7 +66,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_multiple_fields(self):
         "Test GET data with multiple fields"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('res.user'), headers=self.auth_headers,
@@ -79,7 +78,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_language(self):
         "Test GET data with language"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('ir.lang'), headers=self.auth_headers,
@@ -94,7 +93,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_size(self):
         "Test GET data with size limit"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('ir.lang'), headers=self.auth_headers,
@@ -108,7 +107,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_page(self):
         "Test GET data with page"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response0 = c.get(
             self.data_url('ir.lang'), headers=self.auth_headers,
@@ -131,7 +130,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_encoding(self):
         "Test GET data with encoding"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('ir.lang'), headers=self.auth_headers,
@@ -148,7 +147,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_delimiter(self):
         "Test GET data with delimiter"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('res.user'), headers=self.auth_headers,
@@ -160,7 +159,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_quotechar(self):
         "Test GET data with quotechar"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('res.user'), headers=self.auth_headers,
@@ -173,7 +172,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_no_header(self):
         "Test GET data without header"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response = c.get(
             self.data_url('res.user'), headers=self.auth_headers,
@@ -184,7 +183,7 @@ class RoutesTestCase(unittest.TestCase):
 
     def test_data_locale_format(self):
         "Test GET data in locale format"
-        c = Client(app, Response)
+        c = Client(app, BaseResponse)
 
         response_std = c.get(
             self.data_url('res.user'), headers=self.auth_headers,

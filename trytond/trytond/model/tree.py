@@ -3,8 +3,6 @@
 from itertools import chain
 
 from trytond.i18n import gettext
-from trytond.tools import escape_wildcard
-
 from .modelstorage import ValidationError
 
 
@@ -21,8 +19,7 @@ def tree(parent='parent', name='name', separator=None):
             def __setup__(cls):
                 super(TreeMixin, cls).__setup__()
                 field = getattr(cls, name)
-                clause = (
-                    name, 'not like', '%' + escape_wildcard(separator) + '%')
+                clause = (name, 'not like', '%' + separator + '%')
                 # If TreeMixin is after the class where name is defined in
                 # __mro__, it modifies the base field copied so it must ensure
                 # to add only once the domain
@@ -112,7 +109,7 @@ def tree(parent='parent', name='name', separator=None):
                                 parent_name = ', '.join(getattr(r, name)
                                     for r in getattr(record, parent))
                                 raise RecursionError(
-                                    gettext('ir.msg_recursion_error',
+                                    gettext('ir.recursion_error',
                                         rec_name=getattr(record, name),
                                         parent_rec_name=parent_name))
                         walker = list(chain(*(
@@ -125,7 +122,7 @@ def tree(parent='parent', name='name', separator=None):
                             parent_name = getattr(
                                 getattr(record, parent), name)
                             raise RecursionError(
-                                gettext('ir.msg_recursion_error',
+                                gettext('ir.recursion_error',
                                     rec_name=getattr(record, name),
                                     parent_rec_name=parent_name))
                         walker = (getattr(walker, parent) not in visited

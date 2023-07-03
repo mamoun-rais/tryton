@@ -100,10 +100,6 @@ class XMLTestCase(unittest.TestCase):
         'Test time'
         self.dumps_loads(datetime.datetime.now().time())
 
-    def test_biginteger(self):
-        "Test BigInteger"
-        self.dumps_loads(client.MAXINT + 1)
-
     def test_immutable_dict(self):
         "Test ImmutableDict"
         self.dumps_loads(ImmutableDict(foo='bar'))

@@ -1,14 +1,14 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import os
+import sys
 import time
 import warnings
 from email import charset
 
-from lxml import etree, objectify
+__version__ = "6.0.3"
 
-__version__ = "6.0.33"
-
+os.environ.setdefault('TRYTOND_APPNAME', os.path.basename(sys.argv[0]))
 os.environ['TZ'] = 'UTC'
 if hasattr(time, 'tzset'):
     time.tzset()
@@ -18,7 +18,3 @@ if time.tzname[0] != 'UTC':
 
 # set email encoding for utf-8 to 'quoted-printable'
 charset.add_charset('utf-8', charset.QP, charset.QP)
-
-# prevent XML vulnerabilities by default
-etree.set_default_parser(etree.XMLParser(resolve_entities=False))
-objectify.set_default_parser(objectify.makeparser(resolve_entities=False))

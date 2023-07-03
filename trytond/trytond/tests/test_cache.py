@@ -1,7 +1,6 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 
-import datetime as dt
 import time
 import unittest
 
@@ -55,11 +54,14 @@ class MemoryCacheTestCase(unittest.TestCase):
         cache_mod._clear_timeout = 1
         self.addCleanup(
             setattr, cache_mod, '_clear_timeout', clear_timeout)
+        Cache = cache_mod.Cache
+        cache_mod.Cache = MemoryCache
+        self.addCleanup(setattr, cache_mod, 'Cache', Cache)
 
     def tearDown(self):
         MemoryCache.drop(DB_NAME)
 
-    def wait_cache_sync(self, after=None):
+    def wait_cache_sync(self):
         pass
 
     @with_transaction()
@@ -97,9 +99,11 @@ class MemoryCacheTestCase(unittest.TestCase):
         with Transaction().set_current_transaction(transaction1):
             self.assertEqual(cache.get('foo'), 'bar')
 
-        commit_time = dt.datetime.now()
         transaction2.commit()
-        self.wait_cache_sync(after=commit_time)
+        for n in range(10):
+            if cache.get('foo') == 'baz':
+                break
+            self.wait_cache_sync()
         self.assertEqual(cache.get('foo'), 'baz')
 
     def test_memory_cache_nested_transactions(self):
@@ -134,9 +138,8 @@ class MemoryCacheTestCase(unittest.TestCase):
         transaction2 = transaction1.new_transaction()
         self.addCleanup(transaction2.stop)
         cache.clear()
-        commit_time = dt.datetime.now()
         transaction2.commit()
-        self.wait_cache_sync(after=commit_time)
+        self.wait_cache_sync()
 
         # Set value from old transaction
         Transaction().set_current_transaction(transaction1)
@@ -168,11 +171,8 @@ class MemoryCacheChannelTestCase(MemoryCacheTestCase):
         self.addCleanup(
             setattr, cache_mod, '_clear_timeout', clear_timeout)
 
-    def wait_cache_sync(self, after=None):
-        if after is None:
-            after = dt.datetime.now()
-        while MemoryCache._clean_last < after:
-            time.sleep(.01)
+    def wait_cache_sync(self):
+        time.sleep(1)
 
     @unittest.skip("No cache sync on transaction start with channel")
     def test_memory_cache_sync(self):
@@ -224,10 +224,6 @@ class LRUDictTestCase(unittest.TestCase):
 
 class LRUDictTransactionTestCase(unittest.TestCase):
     "Test LRUDictTransaction"
-
-    @classmethod
-    def setUpClass(cls):
-        activate_module('tests')
 
     @with_transaction()
     def test_init(self):

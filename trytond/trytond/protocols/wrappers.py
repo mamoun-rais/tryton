@@ -12,6 +12,7 @@ except ImportError:
     from http import client as HTTPStatus
 
 from werkzeug.wrappers import Request as _Request, Response
+from werkzeug.http import wsgi_to_bytes, bytes_to_wsgi
 from werkzeug.datastructures import Authorization
 from werkzeug.exceptions import abort, HTTPException
 
@@ -20,7 +21,7 @@ from trytond.exceptions import RateLimitException
 from trytond.pool import Pool
 from trytond.tools import cached_property
 from trytond.transaction import Transaction
-from trytond.config import config
+from trytond.config import config, parse_uri
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +75,8 @@ class Request(_Request):
     def authorization(self):
         authorization = super(Request, self).authorization
         if authorization is None:
-            header = self.headers.get('Authorization')
+            header = self.environ.get('HTTP_AUTHORIZATION')
             return parse_authorization_header(header)
-        elif authorization.type == 'session':
-            return parse_session(authorization.token)
         return authorization
 
     @cached_property
@@ -95,11 +94,13 @@ class Request(_Request):
             user_id = security.check(
                 database_name, auth.get('userid'), auth.get('session'),
                 context=context)
+        elif auth.type == 'token':
+            user_id, __ = security.check_token(
+                database_name, auth.get('token'))
         else:
-            parameters = getattr(auth, 'parameters', auth)
             try:
                 user_id = security.login(
-                    database_name, auth.username, parameters, cache=False,
+                    database_name, auth.username, auth, cache=False,
                     context=context)
             except RateLimitException:
                 abort(HTTPStatus.TOO_MANY_REQUESTS)
@@ -118,33 +119,31 @@ class Request(_Request):
 def parse_authorization_header(value):
     if not value:
         return
-    if isinstance(value, bytes):
-        value = value.decode('latin1')
+    value = wsgi_to_bytes(value)
     try:
         auth_type, auth_info = value.split(None, 1)
         auth_type = auth_type.lower()
     except ValueError:
         return
-    if auth_type == 'session':
-        return parse_session(auth_info)
-    else:
-        authorization = Authorization(auth_type)
-        authorization.token = auth_info
-        return authorization
-
-
-def parse_session(token):
-    try:
-        username, userid, session = (
-            base64.b64decode(token).decode().split(':', 3))
-        userid = int(userid)
-    except Exception:
-        return
-    return Authorization('session', {
-            'username': username,
-            'userid': userid,
-            'session': session,
-            })
+    if auth_type == b'session':
+        try:
+            username, userid, session = base64.b64decode(auth_info).split(
+                b':', 3)
+            userid = int(userid)
+        except Exception:
+            return
+        return Authorization('session', {
+                'username': bytes_to_wsgi(username),
+                'userid': userid,
+                'session': bytes_to_wsgi(session),
+                })
+    # JMO: the initial implementation used 'token',
+    # but the IETF specifies 'Bearer'
+    # (cf https://datatracker.ietf.org/doc/html/rfc6750#section-2.1 ).
+    # So, we allow both to maintain compatibility with previous uses,
+    # and be compatible with standard HTTP clients.
+    elif auth_type in (b'token', b'bearer'):
+        return Authorization('token', {'token': bytes_to_wsgi(auth_info)})
 
 
 def set_max_request_size(size):
@@ -171,12 +170,22 @@ def with_pool(func):
     return wrapper
 
 
+def with_pool_by_config(func):
+    @wraps(func)
+    def wrapper(request, *args, **kwargs):
+        uri = config.get('database', 'uri')
+        database_name = parse_uri(uri).path[1:]
+        return with_pool(func)(request, database_name, *args, **kwargs)
+    return wrapper
+
+
 def with_transaction(readonly=None, user=0, context=None):
     from trytond.worker import run_task
 
     def decorator(func):
         @wraps(func)
         def wrapper(request, pool, *args, **kwargs):
+            nonlocal user, context
             readonly_ = readonly  # can not modify non local
             if readonly_ is None:
                 if request.method in {'POST', 'PUT', 'DELETE', 'PATCH'}:
@@ -184,21 +193,19 @@ def with_transaction(readonly=None, user=0, context=None):
                 else:
                     readonly_ = True
             if context is None:
-                context_ = {}
+                context = {}
             else:
-                context_ = context.copy()
-            context_['_request'] = request.context
+                context = context.copy()
+            context['_request'] = request.context
             if user == 'request':
-                user_ = request.user_id
-            else:
-                user_ = user
+                user = request.user_id
             retry = config.getint('database', 'retry')
             for count in range(retry, -1, -1):
                 if count != retry:
                     time.sleep(0.02 * (retry - count))
                 with Transaction().start(
-                        pool.database_name, user_, readonly=readonly_,
-                        context=context_) as transaction:
+                        pool.database_name, user, readonly=readonly_,
+                        context=context) as transaction:
                     try:
                         result = func(request, pool, *args, **kwargs)
                     except backend.DatabaseOperationalError:
@@ -207,9 +214,7 @@ def with_transaction(readonly=None, user=0, context=None):
                             continue
                         logger.error('%s', request, exc_info=True)
                         raise
-                    except Exception as e:
-                        if isinstance(e, HTTPException):
-                            raise
+                    except Exception:
                         logger.error('%s', request, exc_info=True)
                         raise
                     # Need to commit to unlock SQLite database
@@ -231,17 +236,16 @@ def user_application(name, json=True):
             pool = Pool()
             UserApplication = pool.get('res.user.application')
 
-            authorization = request.authorization
-            if authorization is None:
-                header = request.headers.get('Authorization')
-                authorization = parse_authorization_header(header)
-            if authorization is None:
+            authorization = wsgi_to_bytes(request.headers['Authorization'])
+            try:
+                auth_type, auth_info = authorization.split(None, 1)
+                auth_type = auth_type.lower()
+            except ValueError:
                 abort(HTTPStatus.UNAUTHORIZED)
-            if authorization.type != 'bearer':
+            if auth_type != b'bearer':
                 abort(HTTPStatus.FORBIDDEN)
 
-            token = getattr(authorization, 'token', '')
-            application = UserApplication.check(token, name)
+            application = UserApplication.check(bytes_to_wsgi(auth_info), name)
             if not application:
                 abort(HTTPStatus.FORBIDDEN)
             transaction = Transaction()
