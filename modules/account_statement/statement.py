@@ -331,10 +331,11 @@ class Statement(Workflow, ModelSQL, ModelView):
             if getattr(line, 'invoice', None) and line.id:
                 if line.invoice.id not in invoice_id2amount_to_pay:
                     continue
+                if getattr(line, 'amount', None) is None:
+                    continue
                 amount_to_pay = invoice_id2amount_to_pay[line.invoice.id]
-                if (amount_to_pay
-                        and getattr(line, 'amount', None)
-                        and (line.amount >= 0) == (amount_to_pay <= 0)):
+                if ((line.amount > 0) == (amount_to_pay < 0)
+                        or not amount_to_pay):
                     if abs(line.amount) > abs(amount_to_pay):
                         new_line = Line()
                         for field_name, field in Line._fields.items():
@@ -346,11 +347,12 @@ class Statement(Workflow, ModelSQL, ModelView):
                             except AttributeError:
                                 pass
                         new_line.amount = line.amount + amount_to_pay
-                        new_line.invoice = None
+                        new_line.reset_remaining_line(line)
                         line_offset += 1
                         lines.insert(index + line_offset, new_line)
                         invoice_id2amount_to_pay[line.invoice.id] = 0
                         line.amount = amount_to_pay.copy_sign(line.amount)
+
                     else:
                         invoice_id2amount_to_pay[line.invoice.id] = (
                             line.amount + amount_to_pay)
@@ -571,6 +573,8 @@ class Statement(Workflow, ModelSQL, ModelView):
             amount_second_currency = 0
             for line in lines:
                 move_line = line.get_move_line()
+                if not move_line:
+                    continue
                 move_line.move = move
                 amount += move_line.debit - move_line.credit
                 if move_line.amount_second_currency:
@@ -667,20 +671,6 @@ class Statement(Workflow, ModelSQL, ModelView):
     @ModelView.button_action('account_statement.act_reconcile')
     def reconcile(cls, statements):
         pass
-
-    @classmethod
-    def copy(cls, statements, default=None):
-        default = default.copy() if default is not None else {}
-        new_statements = []
-        for origins, sub_statements in groupby(
-                statements, key=lambda s: bool(s.origins)):
-            sub_statements = list(sub_statements)
-            sub_default = default.copy()
-            if origins:
-                sub_default.setdefault('lines')
-            new_statements.extend(super().copy(
-                    statements, default=sub_default))
-        return new_statements
 
 
 def origin_mixin(_states, _depends):
@@ -784,7 +774,6 @@ class Line(
         depends=['company'])
     invoice = fields.Many2One('account.invoice', 'Invoice',
         domain=[
-            ('company', '=', Eval('company', -1)),
             If(Bool(Eval('party')), [('party', '=', Eval('party'))], []),
             If(Bool(Eval('account')), [('account', '=', Eval('account'))], []),
             If(Eval('statement_state') == 'draft',
@@ -793,7 +782,7 @@ class Line(
             ],
         states=_states,
         context={'with_payment': False},
-        depends=['company', 'party', 'account'] + _depends)
+        depends=['party', 'account'] + _depends)
     origin = fields.Many2One('account.statement.origin', 'Origin',
         readonly=True,
         states={
@@ -815,15 +804,15 @@ class Line(
                     })
             cls.date.depends.append('origin')
         cls.account.required = True
-        t = cls.__table__()
-        cls._sql_constraints += [
-            ('check_statement_line_amount', Check(t, t.amount != 0),
-                'account_statement.msg_line_amount_non_zero'),
-            ]
 
-    @staticmethod
-    def default_amount():
-        return Decimal(0)
+    @classmethod
+    def __register__(cls, module):
+        super().__register__(module)
+        table_h = cls.__table_handler__(module)
+
+        # JMO: Migration from 5.0: Allow amount of zero
+        # cf : https://support.coopengo.com/issues/8931
+        table_h.drop_constraint('check_statement_line_amount')
 
     @fields.depends('amount', 'party', 'invoice', 'date')
     def on_change_party(self):
@@ -845,7 +834,6 @@ class Line(
     @fields.depends('amount', 'party', 'account', 'invoice', 'statement',
         'date', '_parent_statement.journal')
     def on_change_amount(self):
-        Currency = Pool().get('currency.currency')
         if self.party:
             with Transaction().set_context(date=self.date):
                 if self.account and self.account not in (
@@ -858,17 +846,7 @@ class Line(
                         self.account = self.party.account_receivable_used
                     else:
                         self.account = self.party.account_payable_used
-        if self.invoice:
-            if self.amount and self.statement and self.statement.journal:
-                invoice = self.invoice
-                journal = self.statement.journal
-                with Transaction().set_context(date=invoice.currency_date):
-                    amount_to_pay = Currency.compute(invoice.currency,
-                        invoice.amount_to_pay, journal.currency)
-                if abs(self.amount) > amount_to_pay:
-                    self.invoice = None
-            else:
-                self.invoice = None
+        self.invoice = None
 
     @fields.depends('account', 'invoice')
     def on_change_account(self):
@@ -1003,6 +981,8 @@ class Line(
         MoveLine = pool.get('account.move.line')
         Currency = Pool().get('currency.currency')
         zero = Decimal("0.0")
+        if not self.amount:
+            return
         with Transaction().set_context(date=self.date):
             amount = Currency.compute(self.statement.journal.currency,
                 self.amount, self.statement.company.currency)
@@ -1023,6 +1003,10 @@ class Line(
             second_currency=second_currency,
             amount_second_currency=amount_second_currency,
             )
+
+    # need to override (client specific modules)
+    def reset_remaining_line(self, from_line):
+        self.invoice = None
 
 
 del _states, _depends
@@ -1171,12 +1155,6 @@ class Origin(origin_mixin(_states, _depends), ModelSQL, ModelView):
                     table.amount - Coalesce(Sum(line.amount), 0), value),
                 group_by=table.id))
         return [('id', 'in', query)]
-
-    @classmethod
-    def copy(cls, origins, default=None):
-        default = default.copy() if default is not None else {}
-        default.setdefault('lines')
-        return super().copy(origins, default=default)
 
 
 del _states, _depends
