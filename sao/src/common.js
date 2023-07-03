@@ -226,7 +226,7 @@
 
     Sao.common.date_format = function(format) {
         if (jQuery.isEmptyObject(format)) {
-            format = '%x';
+            format = '%Y-%m-%d';
             if (Sao.Session.current_session) {
                 var context = Sao.Session.current_session.context;
                 if (context.locale && context.locale.date) {
@@ -578,11 +578,21 @@
     });
     Sao.common.VIEW_SEARCH = new Sao.common.ViewSearch();
 
-    Sao.common.humanize = function(size) {
-        var sizes = ['bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    Sao.common.humanize = function(size, suffix) {
+        suffix = suffix || '';
+        var sizes = ['', 'K', 'M', 'G', 'T', 'P'];
         for (var i =0, len = sizes.length; i < len; i++) {
-            if (size < 1000) {
-                return size.toPrecision(4) + ' ' + sizes[i];
+            if (size <= 1000) {
+                if (size % 1 === 0) {
+                    size = '' + size;
+                } else {
+                    size = size.toLocaleString(
+                        Sao.i18n.BC47(Sao.i18n.getlang()), {
+                            'minimumFractionDigits': 0,
+                            'maximumFractionDigits': 2,
+                        });
+                }
+                return size + sizes[i] + suffix;
             }
             size /= 1000;
         }
@@ -657,9 +667,11 @@
         if (!(selection instanceof Array) &&
                 !(key in this._values2selection)) {
             if (!jQuery.isEmptyObject(this.attributes.selection_change_with)) {
-                prm = this.model.execute(selection, [value]);
+                prm = this.model.execute(
+                    selection, [value], {}, true, false);
             } else {
-                prm = this.model.execute(selection, []);
+                prm = this.model.execute(
+                    selection, [], {}, true, false);
             }
             prm = prm.then(function(selection) {
                 this._values2selection[key] = selection;
@@ -778,12 +790,9 @@
         };
 
         var evaluator;
-        var type_ = field.description.type;
-        if (type_ == 'reference') {
+        if (field.description.type == 'reference') {
             var allowed_models = field.get_models(record);
             evaluator = _model_evaluator(allowed_models);
-        } else if (type_ == 'multiselection') {
-            return;
         } else {
             evaluator = _value_evaluator;
         }
@@ -1285,7 +1294,7 @@
 
             var pslice = function(string, depth) {
                 if (depth > 0) {
-                    return string.substring(0, string.length - depth);
+                    return string.substring(0, depth);
                 }
                 return string;
             };
@@ -1395,8 +1404,8 @@
             }
             return results;
         },
-        is_subdomain: function(element) {
-            return (element instanceof Array) && !element.clause;
+        is_leaf: function(element) {
+            return ((element instanceof Array) && element.clause);
         },
         ending_clause: function(domain, depth) {
             if (depth === undefined) {
@@ -1406,7 +1415,7 @@
                 return [null, depth];
             }
             var last_element = domain[domain.length - 1];
-            if (this.is_subdomain(last_element)) {
+            if (!this.is_leaf(last_element)) {
                 return this.ending_clause(last_element, depth + 1);
             }
             return [last_element, depth];
@@ -1417,9 +1426,9 @@
             for (i = 0, len=domain.length - 1; i < len; i++) {
                 results.push(domain[i]);
             }
-            if (this.is_subdomain(domain[i])) {
-                results.push(
-                    this.replace_ending_clause(domain[i], clause));
+            if (!this.is_leaf(domain[i])) {
+                results = results.concat(this.replace_ending_clause(domain[i],
+                            clause));
             } else {
                 results.push(clause);
             }
@@ -1431,7 +1440,7 @@
             }
             var results = domain.slice(0, -1);
             var last_element = domain[domain.length - 1];
-            if (this.is_subdomain(last_element)) {
+            if (!this.is_leaf(last_element)) {
                 results.push(this.append_ending_clause(last_element, clause,
                             depth - 1));
             } else {
@@ -2172,17 +2181,19 @@
             }
         },
         simplify: function(value) {
-            if (this.is_subdomain(value)) {
-                if ((value.length == 1) && this.is_subdomain(value[0])) {
+            if ((value instanceof Array) && !this.is_leaf(value)) {
+                if ((value.length == 1) && (value[0] instanceof Array) &&
+                        ((value[0][0] == 'AND') || (value[0][0] == 'OR') ||
+                         (value[0][0] instanceof Array))) {
                     return this.simplify(value[0]);
                 } else if ((value.length == 2) &&
-                    ((value[0] == 'AND') || (value[0] == 'OR')) &&
-                    this.is_subdomain(value[1])) {
+                        ((value[0] == 'AND') || (value[0] == 'OR')) &&
+                        (value[1] instanceof Array)) {
                     return this.simplify(value[1]);
                 } else if ((value.length == 3) &&
-                    ((value[0] == 'AND') || (value[0] == 'OR')) &&
-                    this.is_subdomain(value[1]) &&
-                    (value[0] == value[1][0])) {
+                        ((value[0] == 'AND') || (value[0] == 'OR')) &&
+                        (value[1] instanceof Array) &&
+                        (value[0] == value[1][0])) {
                     value = this.simplify(value[1]).concat([value[2]]);
                 }
                 return value.map(this.simplify.bind(this));
@@ -2532,22 +2543,83 @@
                 return models;
             }
         },
+        _bool_operator: function(domain) {
+            var bool_op = 'AND';
+            if ((domain.length > 0) &&
+                ((domain[0] == 'AND') || (domain[0] == 'OR'))) {
+                bool_op = domain[0];
+            }
+            return bool_op;
+        },
+        simplify_nested: function(domain) {
+            if (!domain.length) {
+                return [];
+            } else if (this.is_leaf(domain)) {
+                return [domain];
+            } else if ((domain == 'AND') || (domain == 'OR')) {
+                return [domain];
+            } else if ((domain instanceof Array) && (domain.length == 1)) {
+                return this.simplify_nested(domain[0]);
+            } else {
+                var simplified = [];
+                for (var branch of domain) {
+                    var simplified_branch = this.simplify_nested(branch);
+                    if ((this._bool_operator(simplified_branch) ==
+                            this._bool_operator(simplified)) ||
+                            (simplified_branch.length == 1)) {
+                        if ((simplified.length > 0) &&
+                            (simplified_branch.length > 0) &&
+                            ((simplified_branch[0] == 'AND') ||
+                                (simplified_branch[0] == 'OR'))) {
+                            simplified.push(...simplified_branch.slice(1));
+                        } else {
+                            simplified.push(...simplified_branch);
+                        }
+                    } else {
+                        simplified.push(simplified_branch);
+                    }
+                }
+                return simplified;
+            }
+        },
         simplify: function(domain) {
             if (this.is_leaf(domain)) {
-                return domain;
-            } else if (~['OR', 'AND'].indexOf(domain)) {
-                return domain;
-            } else if ((domain instanceof Array) && (domain.length == 1) &&
-                    (~['OR', 'AND'].indexOf(domain[0]))) {
+                return [domain];
+            } else if (!domain.length) {
                 return [];
-            } else if ((domain instanceof Array) && (domain.length == 1) &&
-                    (!this.is_leaf(domain[0]))) {
-                return this.simplify(domain[0]);
-            } else if ((domain instanceof Array) && (domain.length == 2) &&
-                    ~['AND', 'OR'].indexOf(domain[0])) {
-                return [this.simplify(domain[1])];
             } else {
-                return domain.map(this.simplify.bind(this));
+                var dedup_branches = [];
+                var bool_op = null;
+                if (~['AND', 'OR'].indexOf(domain[0])) {
+                    bool_op = domain[0];
+                    domain = domain.slice(1);
+                }
+                for (var branch of domain) {
+                    var simplified_branch = this.simplify(branch);
+                    if (simplified_branch.length == 0) {
+                        if (bool_op === 'OR') {
+                            return [];
+                        } else {
+                            continue;
+                        }
+                    }
+                    var found_branch = false;
+                    for (var duped_branch of dedup_branches) {
+                        if (Sao.common.compare(
+                            simplified_branch, duped_branch)) {
+                            found_branch = true;
+                            break;
+                        }
+                    }
+                    if (!found_branch) {
+                        dedup_branches.push(simplified_branch);
+                    }
+                }
+
+                if (bool_op && (dedup_branches.length > 1)) {
+                    dedup_branches.unshift(bool_op);
+                }
+                return this.simplify_nested(dedup_branches);
             }
         },
         merge: function(domain, domoperator) {
@@ -2598,7 +2670,7 @@
                 }
                 if ((name.split('.').length - 1) == count &&
                         (domain[1] == '=')) {
-                    return [true, name, value];
+                    return [true, domain[1], value];
                 }
             }
             return [false, null, null];
@@ -3168,15 +3240,16 @@
         build_dialog: function(message, title, prm) {
             var dialog = Sao.common.UserWarningDialog._super.build_dialog.call(
                 this, message, title, prm);
-            var always = jQuery('<input/>', {
-                'type': 'checkbox'
-            });
-            dialog.body.append(jQuery('<div/>', {
-                'class': 'checkbox',
-            }).append(jQuery('<label/>')
-                .text(Sao.i18n.gettext("Always ignore this warning."))
-                .prepend(always))
-            );
+            // Coog specific : do not display this warning button cf bug #9035
+            // var always = jQuery('<input/>', {
+            //     'type': 'checkbox'
+            // });
+            // dialog.body.append(jQuery('<div/>', {
+            //     'class': 'checkbox',
+            // }).append(jQuery('<label/>')
+            //     .text(Sao.i18n.gettext("Always ignore this warning."))
+            //     .prepend(always))
+            // );
             dialog.body.append(jQuery('<p/>')
                     .text(Sao.i18n.gettext('Do you want to proceed?')));
             dialog.footer.empty();
@@ -3192,9 +3265,10 @@
                 'type': 'button'
             }).text(Sao.i18n.gettext('Yes')).click(function() {
                 this.close(dialog);
-                if (always.prop('checked')) {
-                    prm.resolve('always');
-                }
+                // Coog specific : always is not displayed cf bug #9035
+                // if (always.prop('checked')) {
+                //     prm.resolve('always');
+                // }
                 prm.resolve('ok');
             }.bind(this)).appendTo(dialog.footer);
             return dialog;
@@ -3680,7 +3754,8 @@
         var order = field.get_search_order(record);
         var sao_model = new Sao.Model(model);
         return sao_model.execute('search_read',
-                [domain, 0, Sao.config.limit, order, ['rec_name']], context);
+                [domain, 0, Sao.config.limit, order, ['rec_name']], context,
+                undefined, false);
     };
 
     Sao.common.Paned = Sao.class_(Object, {
@@ -3716,7 +3791,7 @@
     });
 
     Sao.common.get_focus_chain = function(element) {
-        var elements = element.find('input,select,textarea');
+        var elements = element.find('input', 'textarea');
         elements.sort(function(a, b) {
             if (('tabindex' in a.attributes) && ('tabindex' in b.attributes)) {
                 var a_tabindex = parseInt(a.attributes.tabindex.value);
@@ -3792,7 +3867,8 @@
 
     Sao.common.download_file = function(data, name, options) {
         if (options === undefined) {
-            var type = Sao.common.guess_mimetype(name);
+            var type = Sao.common.guess_mimetype(
+                name ? name.split('.').pop() : undefined);
             options = {type: type};
         }
         var blob = new Blob([data], options);
@@ -4112,23 +4188,14 @@
         return el.html();
     };
 
-    Sao.common.image_url = function(data) {
-        if (!data) {
-            return null;
-        }
-        var type = '';
-        try {
-            var xml = data;
-            if (xml instanceof Uint8Array) {
-                xml = new TextDecoder().decode(data);
+    Sao.common.clone = function(obj) {
+        var copy = obj.constructor();
+        for (var attr in obj) {
+            if (obj.hasOwnProperty(attr)) {
+                copy[attr] = obj[attr];
             }
-            if (jQuery.parseXML(xml)) {
-                type = 'image/svg+xml';
-            }
-        } catch (e) {
         }
-        var blob = new Blob([data], {type: type});
-        return window.URL.createObjectURL(blob);
+        return copy;
     };
 
 }());

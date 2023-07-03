@@ -135,7 +135,7 @@
         xml_parser: Sao.View.TreeXMLViewParser,
         draggable: false,
         display_size: Sao.config.display_size,
-        init: function(view_id, screen, xml, children_field) {
+        init: function(view_id, screen, xml, children_field, children_definitions) {
             this.children_field = children_field;
             this.sum_widgets = new Map();
             this.columns = [];
@@ -161,6 +161,13 @@
             this.expanded = new Set();
 
             Sao.View.Tree._super.init.call(this, view_id, screen, xml);
+            //
+            // [Coog specific]
+            //      > used for multi_mixed_view , expand_children (?)
+            this.children_definitions = children_definitions;
+            // [Coog specific]
+            //      > attribute always_expand (expand tree view)
+            this.always_expand = this.attributes.always_expand || null;
 
             // Table of records
             this.rows = [];
@@ -199,8 +206,7 @@
                 sum_row.append(jQuery('<th/>'));
                 this.tfoot = jQuery('<tfoot/>');
                 this.tfoot.append(sum_row);
-                // insert before thead to not hide drop-down from thead
-                this.table.prepend(this.tfoot);
+                this.table.append(this.tfoot);
             }
 
             this.columns.forEach(function(column) {
@@ -604,6 +610,10 @@
                     if (Sao.common.contains(expanded, path)) {
                         var children = record.field_get_client(
                             this.children_field);
+                        // JMO add_fields here is to prevent error
+                        // in field_get_client with 'multi_mixed_view'
+                        // on loan contracts. Not sure this is exactly right.
+                        children.model.add_fields(this.children_definitions[children.model.name]);
                         Array.prototype.push.apply(
                             records, group_records(children, path));
                     }
@@ -729,6 +739,8 @@
             }.bind(this));
             this.table.css('min-width', 'calc(' + min_width.join(' + ') + ')');
             this.scrollbar.css('min-width', this.table.css('min-width'));
+            this.tbody.find('tr.more-row > td').attr(
+                'colspan', visible_columns);
 
             if (!this.table.hasClass('no-responsive') &
                 (this.columns.filter(function(c) {
@@ -754,30 +766,18 @@
                 }).map(function(row) {
                     return row.el;
                 }));
-                if ((this.display_size < this.group.length) &&
-                    (!this.tbody.children().last().hasClass('more-row'))) {
+                if (this.display_size < this.group.length) {
                     var more_row = jQuery('<tr/>', {
                         'class': 'more-row',
                     });
-                    var more_cell = jQuery('<td/>', {
-                        'colspan': visible_columns,
-                    });
+                    var more_cell = jQuery('<td/>');
                     var more_button = jQuery('<button/>', {
                         'class': 'btn btn-default btn-block',
                         'type': 'button'
                     }).text(Sao.i18n.gettext('More')
                     ).click(function() {
-                        var height = this.table.height();
                         this.display_size += Sao.config.display_size;
                         this.display();
-                        height -= this.treeview.height();
-                        height -= 50;
-                        if (this.tfoot) {
-                            height -= this.tfoot.height();
-                        }
-                        this.treeview[0].scroll({
-                            'top': height,
-                        });
                     }.bind(this));
                     more_cell.append(more_button);
                     more_row.append(more_cell);
@@ -896,11 +896,6 @@
                             Sao.i18n.BC47(Sao.i18n.getlang()), options);
                         sum_ = (sum_ || 0).toLocaleString(
                             Sao.i18n.BC47(Sao.i18n.getlang()), options);
-                    } else {
-                        selected_sum = (selected_sum || 0).toLocaleString(
-                            Sao.i18n.BC47(Sao.i18n.getlang()));
-                        sum_ = (sum_ || 0).toLocaleString(
-                            Sao.i18n.BC47(Sao.i18n.getlang()));
                     }
                     aggregate = selected_sum + ' / ' + sum_;
                 }
@@ -1111,8 +1106,10 @@
             return row;
         },
         n_children: function(row) {
-            if (!row || !this.children_field) {
-                return this.rows.length;
+            // [Coog specific]
+            //      > used for multi_mixed_view
+            if (!row || !this.children_field || row.is_leaf() | !row.record._values[this.children_field] ) {
+                    return this.rows.length;
             }
             return row.record._values[this.children_field].length;
         },
@@ -1182,7 +1179,7 @@
             }
             if (!this.group.parent) {
                 prm = this.edited_row.record.save();
-            } else if (this.screen.attributes.pre_validate) {
+            } else if (this.screen.attributes.pre_validate && this.record) {
                 prm = this.record.pre_validate();
             } else {
                 prm = jQuery.when();
@@ -1229,19 +1226,12 @@
         var redraw = function() {
             for (; i < rows.length; i++) {
                 var row = rows[i];
-                var record = row.record;
-                var field_name;
-                for (var j=0; j < row.tree.columns.length; j++) {
-                    var column = row.tree.columns[j];
-                    if (column.type == 'field') {
-                        field_name = column.attributes.name;
-                        break;
-                    }
-                }
-                if (field_name && !record.is_loaded(field_name)) {
+                var record = row.record,
+                    column = row.tree.columns[0];
+                if (!record.is_loaded(column.attributes.name)) {
                     // Prefetch the first field to prevent promises in
                     // Cell.render
-                    record.load(field_name).done(redraw);
+                    record.load(column.attributes.name).done(redraw);
                     return;
                 } else {
                     row.redraw(selected, expanded);
@@ -1261,6 +1251,8 @@
             this.record = record;
             this.parent_ = parent;
             this.children_field = tree.children_field;
+            // [Coog specific] multi_mixed_view
+            this.children_definitions = tree.children_definitions;
             this.expander = null;
             this._group_position = null;
             this._path = null;
@@ -1364,9 +1356,8 @@
                     }));
                 }
                 td.on('click keypress', {'index': i}, on_click);
-                if (!this.tree.editable) {
-                    td.dblclick(this.switch_row.bind(this));
-                } else {
+                td.dblclick(this.switch_row.bind(this));
+                if (this.tree.editable) {
                     if (column.attributes.required) {
                         td.addClass('required');
                     }
@@ -1410,9 +1401,24 @@
             }
             return jQuery(row.children()[column_index + offset]);
         },
+
+        // [Coog specific)
+        // > Used for always_expand
+        is_leaf: function(){
+            return !this.record.model.fields.hasOwnProperty(this.children_field);
+        },
+
         redraw: function(selected, expanded) {
             selected = selected || [];
             expanded = expanded || [];
+            var coog_update_expander = function() {
+                // [Coog Specific]  needed for multi_mixed_view
+                // MAB: not sure we still need this
+                if (this.is_leaf()  || !this.record.field_get_client(
+                    this.children_field).length) {
+                    this.expander.css('visibility', 'hidden');
+                }
+            };
             var thead_visible = this.tree.thead.is(':visible');
 
             switch(this.tree.selection_mode) {
@@ -1443,6 +1449,16 @@
 
             if (this._drawed_record !== this.record.identity) {
                 for (var i = 0; i < this.tree.columns.length; i++) {
+                    if ((i === 0) && this.children_field) {
+                        // [Coog Specific]  needed for multi_mixed_view
+                        // MAB: not sure we still need this
+                        if (!this.is_leaf())
+                            this.record.load(this.children_field).done(
+                                coog_update_expander.bind(this));
+                        else
+                            this.record.load('*').done(
+                                coog_update_expander.bind(this));
+                    }
                     var column = this.tree.columns[i];
                     var td = this._get_column_td(i);
                     var cell = td.find('.cell');
@@ -1589,6 +1605,9 @@
                 if (this.rows.length === 0) {
                     var children = this.record.field_get_client(
                         this.children_field);
+                    // [Coog Specific]  needed for multi_mixed_view
+                    if (children.model.name != this.record.model.name)
+                        children.model.add_fields(this.children_definitions[children.model.name]);
                     children.forEach(function(record, pos, group) {
                         // The rows are added to the tbody after being rendered
                         // to minimize browser reflow
@@ -1624,6 +1643,14 @@
             }
             this.tree.switch_(this.path);
         },
+        // [Coog specific] [Bug Sao] call set_selection on child rows as well
+        set_multi_level_selection: function(value){
+            this.set_selection(value);
+            this.rows.forEach(function(row){
+                row.set_multi_level_selection(value);
+            });
+        },
+        // end
         select_column: function(index) {
         },
         select_row: function(event_) {
@@ -1793,7 +1820,7 @@
 
             var current_record = this.tree.screen.current_record;
             if ((this.record != current_record) &&
-                current_record && !current_record.validate(
+                !current_record.validate(
                     this.tree.get_fields(), false, false, true)) {
                 return;
             }
@@ -1871,7 +1898,9 @@
                     }
                 }
             }
-            if (focus_widget) {
+            // JMO BUG#8720
+            // Workaround
+            if (focus_widget && focus_widget.focus) {
                 focus_widget.focus();
             }
         },
@@ -1901,8 +1930,7 @@
                     (event_.which != Sao.common.DOWN_KEYCODE) &&
                     (event_.which != Sao.common.ESC_KEYCODE) &&
                     (event_.which != Sao.common.RETURN_KEYCODE)) ||
-                jQuery(event_.currentTarget)
-                .find('.dropdown-menu:visible').length) {
+                jQuery(event_.currentTarget).find('.dropdown-menu').length) {
                 return;
             }
             var td = this._get_column_td(this.edited_column);
@@ -2304,14 +2332,17 @@
             cell.unbind('click');
             Sao.View.Tree.Many2OneColumn._super.update_text.call(this, cell, record);
             cell.click(function(event) {
+                event.preventDefault();
                 event.stopPropagation();
-                var params = {};
-                params.model = this.attributes.relation;
-                params.res_id = this.field.get(record);
-                params.mode = ['form'];
-                params.name = this.attributes.string;
-                params.context = this.field.get_context(record);
-                Sao.Tab.create(params);
+                if (event && event.ctrlKey) {
+                    var params = {};
+                    params.model = this.attributes.relation;
+                    params.res_id = this.field.get(record);
+                    params.mode = ['form'];
+                    params.name = this.attributes.string;
+                    params.context = this.field.get_context(record);
+                    Sao.Tab.create(params);
+                }
             }.bind(this));
         }
     });
@@ -2496,7 +2527,7 @@
             } else {
                 size = this.field.get(record).length;
             }
-            var text = size? Sao.common.humanize(size) : '';
+            var text = size? Sao.common.humanize(size, 'B') : '';
             cell.children('span').text(text).attr('title', text);
             var button = cell.children('button');
             if (!button.length) {
@@ -2558,7 +2589,14 @@
             }
             var render = function() {
                 var set_src = function(data) {
-                    cell.attr('src', Sao.common.image_url(data));
+                    var img_url, blob;
+                    if (!data) {
+                        img_url = null;
+                    } else {
+                        blob = new Blob([data]);
+                        img_url = window.URL.createObjectURL(blob);
+                    }
+                    cell.attr('src', img_url);
                 }.bind(this);
 
                 var value = this.field.get_client(record);

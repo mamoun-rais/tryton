@@ -13,6 +13,7 @@
             this.name = '';
             this.name_el = jQuery('<span/>');
             this.view_prm = jQuery.when();
+            this.forced_count = false;
         },
         menu_def: function() {
             return [
@@ -272,6 +273,7 @@
                 }).appendTo(jQuery('<div/>', {
                     'class': 'navbar-text hidden-xs',
                 }).insertAfter(this.buttons.previous));
+                this.status_label.click(this._force_count.bind(this));
                 this.buttons.previous.addClass('hidden-xs');
             }
             if (this.buttons.next) {
@@ -323,7 +325,7 @@
         },
         set_name: function(name) {
             this.name = name;
-            this.name_el.text(Sao.common.ellipsize(name, 20));
+            this.name_el.text(Sao.common.ellipsize(name.split(' / ').pop(), 20));
             this.name_el.attr('title', name);
         },
         get_url: function() {
@@ -331,6 +333,9 @@
         compare: function(attributes) {
             return false;
         },
+        _force_count: function(evt) {
+            this.forced_count = true;
+        }
     });
 
     Sao.Tab.counter = 0;
@@ -402,7 +407,7 @@
             'data-toggle': 'tab',
             'href': '#' + tab.id
         }).on('show.bs.tab', function() {
-            Sao.set_url(tab.get_url(), tab.name);
+            Sao.set_url(tab.get_url(), tab.name.split(' / ').pop());
         })
         .append(jQuery('<button/>', {
             'class': 'close'
@@ -487,7 +492,7 @@
             screen.message_callback = this.record_message.bind(this);
             screen.switch_callback = function() {
                 if (this === Sao.Tab.tabs.get_current()) {
-                    Sao.set_url(this.get_url(), this.name);
+                    Sao.set_url(this.get_url(), this.name.split(' / ').pop());
                 }
             }.bind(this);
 
@@ -1488,17 +1493,34 @@
                 this.menu_buttons.save.toggleClass(
                     'disabled', this.screen.readonly);
 
-                var msg = name + ' / ' + data[1];
-                if ((data[1] < data[2]) &&
-                    this.screen.limit !== null &&
-                    (data[2] > this.screen.limit)) {
-                    msg += Sao.i18n.gettext(' of ') + data[2];
+                var msg;
+                var size_display_func;
+                var size = data[1];
+                var max_size = data[2];
+
+                if (this.forced_count) {
+                    size_display_func = (x) => x;
+                } else {
+                    size_display_func = Sao.common.humanize;
+                }
+                if (size < max_size) {
+                    msg = (
+                        name + '@' +
+                        size_display_func(size) + '/' +
+                        size_display_func(max_size));
+                    if (!this.forced_count &&
+                            (max_size >= this.screen.count_limit)) {
+                        msg += '+';
+                    }
+                } else {
+                    msg = name + '/' + size_display_func(size);
                 }
                 this.status_label.text(msg).attr('title', msg);
             }
             this.info_bar.message();
             // TODO activate_save
             this.refresh_attachment_preview();
+            this.forced_count = false;
         },
         action: function() {
             window.setTimeout(function() {
@@ -1580,6 +1602,11 @@
         },
         get_url: function() {
             return this.screen.get_url(this.name);
+        },
+        _force_count: function(evt) {
+            Sao.Tab.Form._super._force_count.call(this, evt);
+            var domain = this.screen.screen_container.get_text();
+            this.screen._force_count(domain);
         },
     });
 
@@ -1668,17 +1695,20 @@
         },
         _close_allowed: function() {
             var wizard = this.wizard;
+            var prm = jQuery.when();
             if ((wizard.state !== wizard.end_state) &&
                 (wizard.end_state in wizard.states)) {
-                wizard.response(
+                prm = wizard.response(
                     wizard.states[wizard.end_state].attributes);
             }
             var dfd = jQuery.Deferred();
-            if (wizard.state === wizard.end_state) {
-                dfd.resolve();
-            } else {
-                dfd.reject();
-            }
+            prm.always(function() {
+                if (wizard.state === wizard.end_state) {
+                    dfd.resolve();
+                } else {
+                    dfd.reject();
+                }
+            });
             return dfd.promise();
         }
     });

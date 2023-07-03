@@ -24,7 +24,7 @@
             }
             return added;
         },
-        execute: function(method, params, context, async) {
+        execute: function(method, params, context, async, process_exception) {
             if (context === undefined) {
                 context = {};
             }
@@ -32,7 +32,7 @@
                 'method': 'model.' + this.name + '.' + method,
                 'params': params.concat(context)
             };
-            return Sao.rpc(args, this.session, async);
+            return Sao.rpc(args, this.session, async, process_exception);
         },
         copy: function(records, context) {
             if (jQuery.isEmptyObject(records)) {
@@ -583,7 +583,19 @@
             this.destroyed = false;
         },
         has_changed: function() {
-            return !jQuery.isEmptyObject(this._changed);
+            var result = !jQuery.isEmptyObject(this._changed);
+            // JCA : #15014 Add a way to make sure some fields are always
+            // ignored when detecting whether the record needs saving or not
+            if (result === false) {
+                return result;
+            }
+            return Object.keys(this._changed).some(
+          this.check_field_never_modified.bind(this));
+        },
+        check_field_never_modified: function(field) {
+            var fields = this.group.model.fields;
+            return !Object.keys(fields).includes(field) ||
+                !fields[field].description.never_modified;
         },
         save: function(force_reload) {
             if (force_reload === undefined) {
@@ -1222,7 +1234,7 @@
             try {
                 result = this.model.execute(
                     'autocomplete_' + fieldname, [values], this.get_context(),
-                    false);
+                    false, false);
             } catch (e) {
                 result = [];
             }
@@ -1302,7 +1314,12 @@
             var values = this._get_on_change_args(
                 Object.keys(this._changed).concat(['id']));
             return this.model.execute('pre_validate',
-                    [values], this.get_context());
+                    [values], this.get_context())
+                .then(function() {
+                    return true;
+                }, function() {
+                    return false;
+                });
         },
         cancel: function() {
             this._loaded = {};
@@ -1481,6 +1498,15 @@
                 }
             }
             this.destroyed = true;
+        },
+        _set_modified: function() {
+            var parent = this.group.parent;
+            if (parent) {
+                parent._changed[this.group.child_name] = true;
+                parent.model.fields[this.group.child_name].changed(parent);
+                parent.validate(null, true, false, true);
+                parent._set_modified();
+            }
         }
     });
 
@@ -1575,8 +1601,9 @@
             return this.get(record);
         },
         set_default: function(record, value) {
-            this.set(record, value);
+            var promise = this.set(record, value);
             record._changed[this.name] = true;
+            return promise;
         },
         set_on_change: function(record, value) {
             this.set(record, value);
@@ -1763,6 +1790,13 @@
 
     Sao.field.Char = Sao.class_(Sao.field.Field, {
         _default: '',
+        set: function(record, value) {
+            // JMO merge_60 : value can apparently be undefined
+            if (this.description.strip && value) {
+                value = value.trim();
+            }
+            Sao.field.Char._super.set.call(this, record, value);
+        },
         get: function(record) {
             return Sao.field.Char._super.get.call(this, record) || this._default;
         }
@@ -1792,12 +1826,6 @@
             return value;
         },
         set_client: function(record, value, force_change) {
-            if (value === null) {
-                value = [];
-            }
-            if (typeof(value) == 'string') {
-                value = [value];
-            }
             if (value) {
                 value = value.slice().sort();
             }
@@ -2044,6 +2072,7 @@
             return rec_name;
         },
         set: function(record, value) {
+            var promise;
             var rec_name = (
                 record._values[this.name + '.'] || {}).rec_name || '';
             if (!rec_name && (value >= 0) && (value !== null)) {
@@ -2174,15 +2203,7 @@
                 group.load(value, modified || default_);
             } else {
                 value.forEach(function(vals) {
-                    var new_record;
-                    if ('id' in vals) {
-                        new_record = group.get(vals.id);
-                        if (!new_record) {
-                            new_record = group.new_(false, vals.id);
-                        }
-                    } else {
-                        new_record = group.new_(false);
-                    }
+                    var new_record = group.new_(false);
                     if (default_) {
                         // Don't validate as parent will validate
                         new_record.set_default(vals, false, false);
@@ -2307,12 +2328,13 @@
         },
         set_on_change: function(record, value) {
             var fields, new_fields;
+            // JMO merge_60 , here we add : record.load(this.name);
             record._changed[this.name] = true;
             this._set_default_value(record);
             if (value instanceof Array) {
                 return this._set_value(record, value, false, true);
             }
-            if (value && (value.add || value.update)) {
+            if (value.add || value.update) {
                 var context = this.get_context(record);
                 fields = record._values[this.name].model.fields;
                 var new_field_names = {};
@@ -2352,7 +2374,7 @@
             }
 
             var group = record._values[this.name];
-            if (value && value.delete) {
+            if (value.delete) {
                 value.delete.forEach(function(record_id) {
                     var record2 = group.get(record_id);
                     if (record2) {
@@ -2360,7 +2382,7 @@
                     }
                 }.bind(this));
             }
-            if (value && value.remove) {
+            if (value.remove) {
                 value.remove.forEach(function(record_id) {
                     var record2 = group.get(record_id);
                     if (record2) {
@@ -2369,7 +2391,7 @@
                 }.bind(this));
             }
 
-            if (value && (value.add || value.update)) {
+            if (value.add || value.update) {
                 // First set already added fields to prevent triggering a
                 // second on_change call
                 if (value.update) {
@@ -2695,8 +2717,7 @@
         },
         get_size: function(record) {
             var data = record._values[this.name] || 0;
-            if ((data instanceof Uint8Array) ||
-                (typeof(data) == 'string')) {
+            if (data instanceof Uint8Array) {
                 return data.length;
             }
             return data;
@@ -2704,8 +2725,7 @@
         get_data: function(record) {
             var data = record._values[this.name] || [];
             var prm = jQuery.when(data);
-            if (!(data instanceof Uint8Array) &&
-                (typeof(data) != 'string')) {
+            if (!(data instanceof Uint8Array)) {
                 if (record.id < 0) {
                     return prm;
                 }

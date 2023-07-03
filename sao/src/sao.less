@@ -3,6 +3,7 @@
 @import "bootstrap";
 @import "bootstrap-rtl";
 @import "sao-variables";
+// JMO : merge_60 TODO: @import "src/coopengo.less";
 html[theme="default"] {
     @import "theme";
 }
@@ -198,8 +199,8 @@ html[theme="default"] {
 
     .navbar-text {
         .badge {
-            max-width: 5em;
-            min-width: 5em;
+            max-width: 7em;
+            min-width: 7em;
             overflow: hidden;
             text-overflow: ellipsis;
         }
@@ -207,6 +208,10 @@ html[theme="default"] {
 
     .navbar-btn {
         .badge {
+            /*  [Coog specific] remove padding to not increase size of navbar-btn
+            margin-top: -3px;
+            margin-bottom: -3px;
+            */
             position: absolute;
             top: -5px;
             right: -5px;
@@ -293,7 +298,6 @@ input[type='color'] {
         height: 100%;
         opacity: 0;
         cursor: pointer;
-
         li& {
             top: auto;
             height: auto;
@@ -424,6 +428,10 @@ img.icon {
         }
 
         tr.more-row {
+            text-align: center;
+        }
+
+        & tr.more-row {
             text-align: center;
         }
     }
@@ -595,6 +603,7 @@ img.icon {
     }
     .form-many2one > .input-group {
         width: 100%;
+        min-width: 12em;
     }
     td.form-one2many, td.form-many2many {
         vertical-align: top;
