@@ -19,8 +19,6 @@ pipeline:
 services:
     postgresql:
         image: postgres
-        environment:
-            - POSTGRES_HOST_AUTH_METHOD=trust
         when:
             matrix:
                 DATABASE: postgresql
