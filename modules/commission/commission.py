@@ -457,6 +457,17 @@ class Commission(ModelSQL, ModelView):
             cls.write(*to_write)
         Invoice.update_taxes(invoices)
 
+    @classmethod
+    def cancel(cls, commissions):
+        cancel_commissions = cls.copy(commissions)
+        for commission in cancel_commissions:
+            commission.update_cancel_copy()
+        cls.save(cancel_commissions)
+        return cancel_commissions
+
+    def update_cancel_copy(self):
+        self.amount *= -1
+
     def _group_to_invoice_key(self):
         direction = {
             'in': 'out',
@@ -516,12 +527,11 @@ class Commission(ModelSQL, ModelView):
 
         invoice_line = InvoiceLine()
         invoice_line.invoice = invoice
-        invoice_line.currency = invoice.currency
-        invoice_line.company = invoice.company
         invoice_line.type = 'line'
-        # Use product.id to instantiate it with the correct context
-        invoice_line.product = product.id
+        invoice_line.product = product
         invoice_line.quantity = 1
+        invoice_line.company = invoice.company
+        invoice_line.currency = invoice.currency
 
         invoice_line.on_change_product()
 

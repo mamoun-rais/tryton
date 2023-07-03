@@ -1,6 +1,8 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 from collections import defaultdict
+from itertools import groupby
+
 from trytond.pool import PoolMeta, Pool
 from trytond.model import ModelView, Workflow, fields
 from trytond.pyson import Eval, If, Bool
@@ -53,23 +55,32 @@ class Invoice(metaclass=PoolMeta):
     @classmethod
     @Workflow.transition('paid')
     def paid(cls, invoices):
+        super(Invoice, cls).paid(invoices)
+        if invoices:
+            cls._set_paid_commissions_dates(invoices)
+
+    @classmethod
+    def _set_paid_commissions_dates(cls, invoices):
         pool = Pool()
         Date = pool.get('ir.date')
         Commission = pool.get('commission')
-
-        today = Date.today()
-
-        super(Invoice, cls).paid(invoices)
+        InvoiceLine = pool.get('account.invoice.line')
 
         date2commissions = defaultdict(list)
-        for sub_invoices in grouped_slice(invoices):
-            ids = [i.id for i in sub_invoices]
-            for commission in Commission.search([
+        for company, c_invoices in groupby(invoices, key=lambda i: i.company):
+            with Transaction().set_context(company=company.id):
+                today = Date.today()
+            for sub_invoices in grouped_slice(list(c_invoices)):
+                ids = [i.id for i in sub_invoices]
+                # JMO : Query optimization
+                commissions = Commission.search([
                         ('date', '=', None),
-                        ('origin.invoice', 'in', ids, 'account.invoice.line'),
-                        ]):
-                date = commission.origin.invoice.reconciled or today
-                date2commissions[date].append(commission)
+                        ('origin', 'in', [str(x) for x in InvoiceLine.search(
+                                    [('invoice', 'in', ids)])]),
+                        ])
+                for commission in commissions:
+                    date = commission.origin.invoice.reconciled or today
+                    date2commissions[date].append(commission)
         to_write = []
         for date, commissions in date2commissions.items():
             to_write.append(commissions)
@@ -80,34 +91,46 @@ class Invoice(metaclass=PoolMeta):
             Commission.write(*to_write)
 
     @classmethod
+    def _get_commissions_to_delete(cls, ids):
+        # Declared to be overloaded for performances improvements
+        # We should improve or overload the field `reference`
+        Commission = Pool().get('commission')
+        return Commission.search([
+                ('invoice_line', '=', None),
+                ('origin.invoice', 'in', ids, 'account.invoice.line'),
+                ])
+
+    @classmethod
+    def _get_commissions_to_cancel(cls, ids):
+        # Declared to be overloaded for performances improvements
+        # We should improve or overload the field `reference`
+        Commission = Pool().get('commission')
+        return Commission.search([
+                ('invoice_line', '!=', None),
+                ('origin.invoice', 'in', ids, 'account.invoice.line'),
+                ])
+
+    @classmethod
     @ModelView.button
     @Workflow.transition('cancelled')
     def cancel(cls, invoices):
+        # Because domain resolution of the field `reference` creates
+        # a non-optimized query: we temporary created two function to be
+        # overloaded
+        # Issue: 2913
         pool = Pool()
         Commission = pool.get('commission')
-
-        invoices_to_revert_commission = [x for x in invoices if not x.move]
 
         super(Invoice, cls).cancel(invoices)
 
         to_delete = []
-        to_save = []
-        for sub_invoices in grouped_slice(invoices_to_revert_commission):
+        for sub_invoices in grouped_slice(invoices):
             ids = [i.id for i in sub_invoices]
-            to_delete += Commission.search([
-                    ('invoice_line', '=', None),
-                    ('origin.invoice', 'in', ids, 'account.invoice.line'),
-                    ])
-            to_cancel = Commission.search([
-                    ('invoice_line', '!=', None),
-                    ('origin.invoice', 'in', ids, 'account.invoice.line'),
-                    ])
-            for commission in Commission.copy(to_cancel):
-                commission.amount *= -1
-                to_save.append(commission)
+            to_delete += cls._get_commissions_to_delete(ids)
+            to_cancel = cls._get_commissions_to_cancel(ids)
+            Commission.cancel(to_cancel)
 
         Commission.delete(to_delete)
-        Commission.save(to_save)
 
     def _credit(self, **values):
         values.setdefault('agent', self.agent)
