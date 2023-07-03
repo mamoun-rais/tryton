@@ -13,12 +13,13 @@ import sql.operators
 from trytond.tools import (
     reduce_ids, reduce_domain, decimal_, is_instance_method, file_open,
     strip_wildcard, lstrip_wildcard, rstrip_wildcard, slugify, sortable_values,
-    escape_wildcard, unescape_wildcard, is_full_text, firstline)
+    escape_wildcard, timezone, unescape_wildcard, is_full_text, firstline)
 from trytond.tools.string_ import StringPartitioned, LazyString
 from trytond.tools.domain_inversion import (
     domain_inversion, parse, simplify, merge, concat, unique_value,
     eval_domain, localize_domain,
     prepare_reference_domain, extract_reference_models)
+from trytond.tools.logging import format_args
 
 
 class ToolsTestCase(unittest.TestCase):
@@ -279,6 +280,68 @@ class StringPartitionedTestCase(unittest.TestCase):
         self.assertEqual(s, 'barfoo')
         self.assertEqual(list(s), ['bar', 'foo'])
 
+    def test_format_args(self):
+        "Test format_args"
+        for args, kwargs, short_form, long_form in [
+                (tuple(), {}, "()", "()"),
+                (('abcdefghijklmnopqrstuvwxyz',), {},
+                    "('abcdefghijklmnopq...')",
+                    "('abcdefghijklmnopqrstuvwxyz')"),
+                ((b'foo',), {}, "(<3 bytes>)", "(b'foo')"),
+                (([1, 2, 3, 4], [4, 5, 6, 7], [8, 9, 10, 11]), {},
+                    "([1, 2, 3, 4], [4, 5, 6, 7], [8, 9, 10, 11])",
+                    "([1, 2, 3, 4], [4, 5, 6, 7], [8, 9, 10, 11])"),
+                (([1, 2, 3, 4, 5, 6], [4, 5, 6, 7], [8, 9, 10, 11]), {},
+                    "([1, 2, 3, 4, 5, ...], [4, 5, 6, 7], [8, 9, 10, 11])",
+                    "([1, 2, 3, 4, 5, 6], [4, 5, 6, 7], [8, 9, 10, 11])"),
+                (([1, 2, 3], 'foo'), {'a': '1'},
+                    "([1, 2, 3], 'foo', a='1')",
+                    "([1, 2, 3], 'foo', a='1')"),
+                ((list(range(5)),), {},
+                    "([0, 1, 2, 3, 4])",
+                    "([0, 1, 2, 3, 4])"),
+                ((list(range(6)),), {},
+                    "([0, 1, 2, 3, 4, ...])",
+                    "([0, 1, 2, 3, 4, 5])"),
+                (('a', 'b', 'c', 'd'), {},
+                    "('a', 'b', 'c', ...)", "('a', 'b', 'c', 'd')"),
+                (([1, [2, [3, [4, [5, [6]]]]]],), {},
+                    "([1, [2, [3, [4, [5, ...]]]]])",
+                    "([1, [2, [3, [4, [5, [6]]]]]])"),
+                (tuple(), {'a': 1, 'b': 2}, "(a=1, b=2)", "(a=1, b=2)"),
+                ((list(range(10)), 'foo'), {'a': '1'},
+                    "([0, 1, 2, 3, 4, ...], 'foo', a='1')",
+                    "([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'foo', a='1')"),
+                ((list(range(4)), 'foo'), {k: k for k in 'abcdefg'},
+                    "([0, 1, 2, 3], 'foo', a='a', ...)",
+                    "([0, 1, 2, 3], 'foo', a='a', b='b', c='c', d='d',"
+                    " e='e', f='f', g='g')"),
+                ((list(range(5)), list(range(20, 25))),
+                    {k: list(range(7)) for k in 'ab'},
+                    "([0, 1, 2, 3, 4], [20, 21, 22, 23, 24], "
+                    "a=[0, 1, 2, 3, 4, ...], ...)",
+                    "([0, 1, 2, 3, 4], [20, 21, 22, 23, 24], "
+                    "a=[0, 1, 2, 3, 4, 5, 6], b=[0, 1, 2, 3, 4, 5, 6])"),
+                (tuple(), {k: {i: i for i in range(7)} for k in 'abcd'},
+                    "(a={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, ...}, "
+                    "b={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, ...}, "
+                    "c={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, ...}, ...)",
+                    "(a={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}, "
+                    "b={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}, "
+                    "c={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6}, "
+                    "d={0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6})"),
+                ]:
+            with self.subTest(form='short', args=args, kwargs=kwargs):
+                self.assertEqual(
+                    str(format_args(args, kwargs, max_args=3, max_items=5)),
+                    short_form)
+            with self.subTest(form='long', args=args, kwargs=kwargs):
+                self.assertEqual(
+                    str(format_args(
+                            args, kwargs, verbose=True, max_args=3,
+                            max_items=5)),
+                    long_form)
+
 
 class LazyStringTestCase(unittest.TestCase):
     "Test LazyString"
@@ -308,6 +371,11 @@ class LazyStringTestCase(unittest.TestCase):
         s = 'bar' + s
 
         self.assertEqual(s, 'barfoo')
+
+    def test_get_server_zoneinfo(self):
+        zi = timezone._get_zoneinfo('foo')
+        now = dt.datetime(2022, 5, 17, tzinfo=zi)
+        self.assertEqual(str(now), "2022-05-17 00:00:00+00:00")
 
 
 class DomainInversionTestCase(unittest.TestCase):
@@ -429,7 +497,7 @@ class DomainInversionTestCase(unittest.TestCase):
             domain_inversion(domain, 'x', {'y': 7, 'z': 'abc'}), True)
         self.assertEqual(
             domain_inversion(domain, 'x', {'y': 4, 'z': 'b'}),
-            ['OR', [['x', '=', 3]], [['x', '=', 2]]])
+            ['OR', ['x', '=', 3], ['x', '=', 2]])
 
     def test_parse(self):
         domain = parse([['x', '=', 5]])
@@ -451,22 +519,69 @@ class DomainInversionTestCase(unittest.TestCase):
         domain = [[['x', '=', 3]]]
         self.assertEqual(simplify(domain), [['x', '=', 3]])
 
+        domain = [[['x', '=', 3], ['y', '=', 4]]]
+        self.assertEqual(simplify(domain), [['x', '=', 3], ['y', '=', 4]])
+
         domain = ['OR', ['x', '=', 3]]
         self.assertEqual(simplify(domain), [['x', '=', 3]])
 
         domain = ['OR', [['x', '=', 3]], [['y', '=', 5]]]
         self.assertEqual(
-            simplify(domain), ['OR', [['x', '=', 3]], [['y', '=', 5]]])
+            simplify(domain), ['OR', ['x', '=', 3], ['y', '=', 5]])
 
         domain = ['OR', ['x', '=', 3], ['AND', ['y', '=', 5]]]
         self.assertEqual(
-            simplify(domain), ['OR', ['x', '=', 3], [['y', '=', 5]]])
+            simplify(domain), ['OR', ['x', '=', 3], ['y', '=', 5]])
+
+        domain = [['x', '=', 3], ['OR']]
+        self.assertEqual(simplify(domain), [['x', '=', 3]])
+
+        domain = ['OR', ['x', '=', 3], []]
+        self.assertEqual(simplify(domain), [])
+
+        domain = ['OR', ['x', '=', 3], ['OR']]
+        self.assertEqual(simplify(domain), [])
+
+        domain = [['x', '=', 3], []]
+        self.assertEqual(simplify(domain), [['x', '=', 3]])
+
+        domain = [['x', '=', 3], ['AND']]
+        self.assertEqual(simplify(domain), [['x', '=', 3]])
 
         domain = ['AND']
         self.assertEqual(simplify(domain), [])
 
         domain = ['OR']
         self.assertEqual(simplify(domain), [])
+
+    def test_simplify_deduplicate(self):
+        "Test deduplicate"
+        clause = ('x', '=', 'x')
+        another = ('y', '=', 'y')
+        third = ('z', '=', 'z')
+        tests = [
+            ([], []),
+            (['OR', []], []),
+            (['AND', []], []),
+            ([clause], [clause]),
+            (['OR', clause], [clause]),
+            ([clause, clause], [clause]),
+            (['OR', clause, clause], [clause]),
+            ([clause, [clause, clause]], [clause]),
+            ([clause, another], [clause, another]),
+            (['OR', clause, another], ['OR', clause, another]),
+            ([clause, clause, another], [clause, another]),
+            ([clause, [clause, clause], another], [clause, another]),
+            ([clause, clause, another, another], [clause, another]),
+            ([clause, another, clause, another], [clause, another]),
+            (
+                ['AND', ['OR', clause, another], third],
+                ['AND', ['OR', clause, another], third]),
+            ]
+
+        for input, expected in tests:
+            with self.subTest(input=input):
+                self.assertEqual(simplify(input), expected)
 
     def test_merge(self):
         domain = [['x', '=', 6], ['y', '=', 7]]
@@ -517,11 +632,11 @@ class DomainInversionTestCase(unittest.TestCase):
         self.assertEqual(concat([], []), [])
         self.assertEqual(
             concat(domain1, domain2, domoperator='OR'),
-            ['OR', [['a', '=', 1]], [['b', '=', 2]]])
+            ['OR', ['a', '=', 1], ['b', '=', 2]])
 
     def test_unique_value(self):
         domain = [['a', '=', 1]]
-        self.assertEqual(unique_value(domain), (True, 'a', 1))
+        self.assertEqual(unique_value(domain), (True, '=', 1))
 
         domain = [['a', '!=', 1]]
         self.assertFalse(unique_value(domain)[0])
@@ -533,7 +648,7 @@ class DomainInversionTestCase(unittest.TestCase):
         self.assertFalse(unique_value(domain)[0])
 
         domain = [['a.id', '=', 1, 'model']]
-        self.assertEqual(unique_value(domain), (True, 'a.id', ['model', 1]))
+        self.assertEqual(unique_value(domain), (True, '=', ['model', 1]))
 
         domain = [['a.b.id', '=', 1, 'model']]
         self.assertEqual(unique_value(domain), (False, None, None))

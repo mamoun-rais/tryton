@@ -2,7 +2,6 @@
 # this repository contains the full copyright notices and license terms.
 import logging
 import smtplib
-import ssl
 from email.message import Message
 from email.utils import formatdate
 from email.mime.text import MIMEText
@@ -10,6 +9,8 @@ from urllib.parse import parse_qs, unquote_plus
 
 from trytond.config import config, parse_uri
 from trytond.transaction import Transaction
+from trytond.model.exceptions import ValidationError
+from trytond.i18n import gettext
 
 __all__ = ['sendmail_transactional', 'sendmail', 'SMTPDataManager']
 logger = logging.getLogger(__name__)
@@ -70,19 +71,18 @@ def get_smtp_server(uri=None, strict=False):
             extra[key] = cast.get(key, lambda a: a)(value[0])
     if uri.scheme.startswith('smtps'):
         connector = smtplib.SMTP_SSL
-        extra['context'] = ssl.create_default_context()
     else:
         connector = smtplib.SMTP
     try:
         server = connector(uri.hostname, uri.port, **extra)
     except Exception:
-        if strict:
-            raise
         logger.error('fail to connect to %s', uri, exc_info=True)
+        if strict:
+            raise ValidationError(gettext('ir.msg_missing_configuration'))
         return
 
     if 'tls' in uri.scheme:
-        server.starttls(context=ssl.create_default_context())
+        server.starttls()
 
     if uri.username and uri.password:
         server.login(

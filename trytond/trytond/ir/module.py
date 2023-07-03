@@ -570,6 +570,7 @@ class ModuleActivateUpgrade(Wizard):
             lang = [x.code for x in langs]
         if update:
             pool.init(update=update, lang=lang)
+            pool.post_init(update)
             Cache.refresh_pool(transaction)
         return 'done'
 

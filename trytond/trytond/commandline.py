@@ -2,6 +2,9 @@
 # this repository contains the full copyright notices and license terms.
 import argparse
 import os
+import sys
+import signal
+import traceback
 import logging
 import logging.config
 import logging.handlers
@@ -64,6 +67,9 @@ def get_parser_cron():
     parser = get_parser_daemon()
     parser.add_argument("-1", "--once", dest='once', action='store_true',
         help="run pending tasks and halt")
+    parser.add_argument("--check", dest='check', action='store_true',
+        help="Checks the existence of canary file for all given databases."
+        "The exit status will be 0 if ok, else 1")
     return parser
 
 
@@ -72,6 +78,11 @@ def get_parser_admin():
 
     parser.add_argument("-u", "--update", dest="update", nargs='+', default=[],
         metavar='MODULE', help="activate or update a module")
+    # ABDC: Add option to check if update is needed
+    parser.add_argument("-cu", "--check-update", dest="check_update",
+        nargs='+', default=[], metavar='VALUE',
+        help="Verify if installed module versions has changed before playing "
+        "the update")
     parser.add_argument("--all", dest="update", action="append_const",
         const="ir", help="update all activated modules")
     parser.add_argument("--activate-dependencies", dest="activatedeps",
@@ -124,10 +135,16 @@ def get_parser_stat():
 
 
 def config_log(options):
+    log_level = os.environ.get('LOG_LEVEL', None)
     if options.logconf:
         logging.config.fileConfig(options.logconf)
         logging.getLogger('server').info('using %s as logging '
             'configuration file', options.logconf)
+    elif log_level is not None:
+        logformat = ('%(process)s %(thread)s [%(asctime)s] '
+            '%(levelname)s %(name)s %(message)s')
+        level = getattr(logging, log_level)
+        logging.basicConfig(level=level, format=logformat)
     else:
         logformat = ('%(process)s %(thread)s [%(asctime)s] '
             '%(levelname)s %(name)s %(message)s')
@@ -146,3 +163,25 @@ def pidfile(options):
             fd.write('%d' % os.getpid())
         yield
         os.unlink(path)
+
+
+# AKE: generates a callback to clean process before stop
+def generate_signal_handler(pidfile):
+    def shutdown(signum, frame):
+        logger.info('shutdown')
+        logging.shutdown()
+        if pidfile:
+            os.unlink(pidfile)
+        if signum != 0:
+            traceback.print_stack(frame)
+        sys.exit(signum)
+    return shutdown
+
+
+# AKE: attach handler to common term signals
+def handle_signals(handler):
+    sig_names = ('SIGINT', 'SIGTERM', 'SIGQUIT')
+    for sig_name in sig_names:
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            signal.signal(sig, handler)

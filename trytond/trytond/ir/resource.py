@@ -26,10 +26,8 @@ class ResourceAccessMixin(ModelStorage):
         Model = pool.get('ir.model')
         ModelAccess = pool.get('ir.model.access')
         models = Model.get_name_items()
-        if Transaction().context.get('_check_access'):
-            access = ModelAccess.get_access([m for m, _ in models])
-            models = [(m, n) for m, n in models if access[m]['read']]
-        return models
+        access = ModelAccess.get_access([m for m, _ in models])
+        return [(m, n) for m, n in models if access[m]['read']]
 
     @classmethod
     def check_access(cls, ids, mode='read'):

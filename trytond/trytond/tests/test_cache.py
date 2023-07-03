@@ -55,6 +55,9 @@ class MemoryCacheTestCase(unittest.TestCase):
         cache_mod._clear_timeout = 1
         self.addCleanup(
             setattr, cache_mod, '_clear_timeout', clear_timeout)
+        Cache = cache_mod.Cache
+        cache_mod.Cache = MemoryCache
+        self.addCleanup(setattr, cache_mod, 'Cache', Cache)
 
     def tearDown(self):
         MemoryCache.drop(DB_NAME)
@@ -224,10 +227,6 @@ class LRUDictTestCase(unittest.TestCase):
 
 class LRUDictTransactionTestCase(unittest.TestCase):
     "Test LRUDictTransaction"
-
-    @classmethod
-    def setUpClass(cls):
-        activate_module('tests')
 
     @with_transaction()
     def test_init(self):

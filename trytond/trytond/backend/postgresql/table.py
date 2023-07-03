@@ -56,9 +56,9 @@ class TableHandler(TableHandlerInterface):
                 cursor.execute(
                     SQL(
                         "ALTER TABLE {} ADD COLUMN id INTEGER "
-                        "DEFAULT nextval(format(%s, %s)) NOT NULL").format(
+                        "DEFAULT nextval(%s) NOT NULL").format(
                         Identifier(self.table_name)),
-                    ('%I', self.sequence_name))
+                    (self.sequence_name,))
                 cursor.execute(
                     SQL('ALTER TABLE {} ADD PRIMARY KEY(id)')
                     .format(Identifier(self.table_name)))
@@ -71,31 +71,27 @@ class TableHandler(TableHandlerInterface):
             cursor.execute(
                 SQL(
                     "ALTER TABLE {} ADD COLUMN __id INTEGER "
-                    "DEFAULT nextval(format(%s, %s)) NOT NULL").format(
+                    "DEFAULT nextval(%s) NOT NULL").format(
                         Identifier(self.table_name)),
-                ('%I', self.sequence_name))
+                (self.sequence_name,))
             cursor.execute(
                 SQL('ALTER TABLE {} ADD PRIMARY KEY(__id)')
                 .format(Identifier(self.table_name)))
         else:
-            default = (
-                "nextval((format('%%I'::text, '%s'))::regclass)"
-                % self.sequence_name)
+            default = "nextval('%s'::regclass)" % self.sequence_name
             if self.history:
                 if self._columns['__id']['default'] != default:
                     cursor.execute(
                         SQL("ALTER TABLE {} "
-                            "ALTER __id SET "
-                            "DEFAULT nextval(format(%s, %s))")
+                            "ALTER __id SET DEFAULT nextval(%s::regclass)")
                         .format(Identifier(self.table_name)),
-                        ('%I', self.sequence_name))
+                        (self.sequence_name,))
             if self._columns['id']['default'] != default:
                 cursor.execute(
                     SQL("ALTER TABLE {} "
-                        "ALTER id SET "
-                        "DEFAULT nextval(format(%s, %s))")
+                        "ALTER id SET DEFAULT nextval(%s::regclass)")
                     .format(Identifier(self.table_name)),
-                    ('%I', self.sequence_name,))
+                    (self.sequence_name,))
         self._update_definitions()
 
     @staticmethod
@@ -376,7 +372,7 @@ class TableHandler(TableHandlerInterface):
                     column=Identifier(column_name),
                     reference=Identifier(reference),
                     action=SQL(on_delete)))
-            self._update_definitions(constraints=True)
+        self._update_definitions(constraints=True)
 
     def drop_fk(self, column_name, table=None):
         self.drop_constraint(column_name + '_fkey', table=table)

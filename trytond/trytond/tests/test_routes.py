@@ -35,8 +35,7 @@ class RoutesTestCase(unittest.TestCase):
     @property
     def auth_headers(self):
         return {
-            'Authorization': (
-                'Basic ' + base64.b64encode(b'admin:password').decode()),
+            'Authorization': b'Basic ' + base64.b64encode(b'admin:password'),
             }
 
     def data_url(self, model):

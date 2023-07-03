@@ -9,10 +9,23 @@ from werkzeug.exceptions import abort
 from trytond.config import config
 from trytond.wsgi import app
 from trytond.protocols.wrappers import (
-    with_pool, with_transaction, allow_null_origin)
+    with_pool, with_transaction, allow_null_origin, with_pool_by_config)
 from trytond.transaction import Transaction
 
 logger = logging.getLogger(__name__)
+
+
+@app.route('/liveness', methods=['GET'])
+@with_pool_by_config
+@with_transaction(readonly=True)
+def livenessness(request, pool):
+    return 'alive\n'
+
+
+@app.route('/<database_name>/readiness', methods=['GET'])
+@with_pool
+def readiness(request, pool):
+    return 'ready\n'
 
 
 @app.route('/<database_name>/user/application/', methods=['POST', 'DELETE'])

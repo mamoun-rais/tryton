@@ -15,10 +15,12 @@ from werkzeug.security import safe_join
 
 try:
     from pysqlite2 import dbapi2 as sqlite
+    from pysqlite2.dbapi2 import DatabaseError
     from pysqlite2.dbapi2 import IntegrityError as DatabaseIntegrityError
     from pysqlite2.dbapi2 import OperationalError as DatabaseOperationalError
 except ImportError:
     import sqlite3 as sqlite
+    from sqlite3 import DatabaseError
     from sqlite3 import IntegrityError as DatabaseIntegrityError
     from sqlite3 import OperationalError as DatabaseOperationalError
 from sql import Flavor, Table, Query, Expression, Literal, Null
@@ -30,10 +32,16 @@ from trytond.backend.database import DatabaseInterface, SQLType
 from trytond.config import config, parse_uri
 from trytond.transaction import Transaction
 
-__all__ = ['Database', 'DatabaseIntegrityError', 'DatabaseOperationalError']
+
+__all__ = ['Database', 'DatabaseIntegrityError', 'DatabaseOperationalError',
+    'DatabaseTimeoutError']
 logger = logging.getLogger(__name__)
 
 _default_name = config.get('database', 'default_name', default=':memory:')
+
+
+class DatabaseTimeoutError(Exception):
+    pass
 
 
 class SQLiteExtract(Function):
@@ -45,13 +53,13 @@ class SQLiteExtract(Function):
         if date is None:
             return None
         if len(date) == 10:
-            year, month, day = map(int, date.split('-'))
+            year, month, day = list(map(int, date.split('-')))
             date = datetime.date(year, month, day)
         else:
             datepart, timepart = date.split(" ")
-            year, month, day = map(int, datepart.split("-"))
+            year, month, day = list(map(int, datepart.split("-")))
             timepart_full = timepart.split(".")
-            hours, minutes, seconds = map(int, timepart_full[0].split(":"))
+            hours, minutes, seconds = list(map(int, timepart_full[0].split(":")))
             if len(timepart_full) == 2:
                 microseconds = int(timepart_full[1])
             else:
@@ -344,6 +352,9 @@ class Database(DatabaseInterface):
         if name == ':memory:':
             Database._local.memory_database = self
 
+    def _kill_session_query(self, database_name):
+        return 'SELECT 1'
+
     def connect(self):
         if self._conn is not None:
             return self
@@ -429,7 +440,8 @@ class Database(DatabaseInterface):
         db_uri = urllib.parse.urlunparse(db_uri)
         return db_uri.replace('sqlite', 'file', 1)
 
-    def get_connection(self, autocommit=False, readonly=False):
+    def get_connection(
+            self, autocommit=False, readonly=False, statement_timeout=None):
         if self._conn is None:
             self.connect()
         if autocommit:
@@ -469,6 +481,10 @@ class Database(DatabaseInterface):
             return
         os.remove(os.path.join(config.get('database', 'path'),
             database_name + '.sqlite'))
+
+    def _kill_session_query(self, database_name):
+        # JMO : not necessary
+        return 'select 1'
 
     def list(self, hostname=None):
         res = []

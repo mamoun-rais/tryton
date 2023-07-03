@@ -130,6 +130,10 @@ Please refer to `psycopg2 for the complete specification of the URI
 A list of parameters supported by PostgreSQL can be found in the
 `documentation <https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS>`_.
 
+.. note::
+   ``fallback_application_name`` parameter from aforementioned documentation can
+   be set directly thanks to the ``TRYTOND_APPNAME`` environment variable.
+
 SQLite
 ******
 
@@ -192,6 +196,20 @@ default_name
 The name of the database to use for operations without a database name.
 Default: ``template1`` for PostgreSQL, ``:memory:`` for SQLite.
 
+unaccent_function
+~~~~~~~~~~~~~~~~~
+
+The name of the unaccent function.
+
+Default: ``unaccent``
+
+similarity_function
+~~~~~~~~~~~~~~~~~~~
+
+The name of the similarity function.
+
+Default: ``similarity``
+
 request
 -------
 
@@ -246,6 +264,27 @@ If the value is 0, the notification between processes will be done using
 channels if the back-end supports them.
 
 Default: ``300``
+
+rpc.<model>.<method>
+~~~~~~~~~~~~~~~~~~~~
+
+The duration in seconds of the cache for the RPC answer to `method` of the
+model named `model`. It will override the value defined in the model.
+
+count_timeout
+~~~~~~~~~~~~~
+
+The cache timeout duration in seconds of the estimation of records.
+
+Default: ``86400`` (1 day)
+
+count_clear
+~~~~~~~~~~~
+
+The number of operations after which the counting estimation of records is
+cleared.
+
+Default: ``1000``
 
 queue
 -----

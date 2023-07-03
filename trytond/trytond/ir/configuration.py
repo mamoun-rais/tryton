@@ -21,7 +21,8 @@ class Configuration(ModelSingleton, ModelSQL):
         language = cls._get_language_cache.get(None)
         if language is not None:
             return language
-        language = cls(1).language
+        config = cls(1)
+        language = config.language
         if not language:
             language = config.get('database', 'language')
         cls._get_language_cache.set(None, language)

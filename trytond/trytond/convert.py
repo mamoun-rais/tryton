@@ -14,6 +14,8 @@ from trytond.pyson import PYSONEncoder, CONTEXT
 from trytond.tools import grouped_slice
 from trytond.transaction import Transaction
 
+from trytond.server_context import ServerContext
+
 logger = logging.getLogger(__name__)
 
 CDATA_START = re.compile(r'^\s*\<\!\[cdata\[', re.IGNORECASE)
@@ -354,7 +356,7 @@ class Fs2bdAccessor:
         if fs_id not in self.fs2db[module]:
             self.fs2db[module][fs_id] = {}
         fs2db_val = self.fs2db[module][fs_id]
-        for key, val in values.items():
+        for key, val in list(values.items()):
             fs2db_val[key] = val
 
     def reset_browsercord(self, module, model_name, ids=None):
@@ -391,7 +393,7 @@ class Fs2bdAccessor:
             record_ids[rec.model].append(rec.db_id)
 
         self.browserecord[module] = {}
-        for model_name in record_ids.keys():
+        for model_name in list(record_ids.keys()):
             try:
                 Model = self.pool.get(model_name)
             except KeyError:
@@ -568,6 +570,9 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
         return set(rec.fs_id for rec in module_data)
 
     def import_record(self, model, values, fs_id):
+        force_xml_update = ServerContext().get('force_xml_update')
+        if force_xml_update and fs_id not in force_xml_update:
+            return
         module = self.module
 
         if not fs_id:
@@ -593,8 +598,21 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
             if module == self.module and fs_id in self.to_delete:
                 self.to_delete.remove(fs_id)
 
+            # VGA: See bug #20636
+            # Noupdate flag, we need to register it in the db
             if self.noupdate and self.module_state != 'to activate':
-                return
+                db_id, mdata_id = [
+                    self.fs2db.get(module, fs_id)[x]
+                    for x in ['db_id', 'id']]
+                if db_id is None:
+                    return
+                current_record = self.ModelData(mdata_id)
+                if not current_record.noupdate:
+                    self.ModelData.write([current_record], {
+                        'noupdate': True,
+                    })
+                if not force_xml_update:
+                    return
 
             # this record is already in the db:
             # XXX maybe use only one call to get()
@@ -605,6 +623,14 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
             # Check if record has not been deleted
             if db_id is None:
                 return
+
+            # VGA: See bug #20636
+            if not self.noupdate:
+                current_record = self.ModelData(mdata_id)
+                if current_record.noupdate:
+                    self.ModelData.write([current_record], {
+                        'noupdate': False,
+                    })
 
             if not old_values:
                 old_values = {}
@@ -665,7 +691,12 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
                 # expected value differs from the actual value, _and_
                 # if they are not false in a boolean context (ie None,
                 # False, {} or [])
-                if db_field != expected_value and (db_field or expected_value):
+
+                # RSE #19451
+                # The verification should be made only on noupdate mode,
+                # otherwise the DB should be squashed with the XML content
+                if self.noupdate and db_field != expected_value and (
+                        db_field or expected_value) and not force_xml_update:
                     logger.warning(
                         "Field %s of %s@%s not updated (id: %s), because "
                         "it has changed since the last update",
@@ -696,6 +727,7 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
 
         mdata_values = []
         for record, values, fs_id in zip(records, vlist, fs_ids):
+            logger.debug(self.module + ':loading ' + fs_id)
             for key in values:
                 values[key] = self._clean_value(key, record)
 
@@ -762,7 +794,7 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
             fs_values = old_values.copy()
             fs_values.update(new_values)
 
-            if old_values != values or values != fs_values:
+            if values != fs_values or ServerContext().get('force_xml_update'):
                 self.grouped_model_data.extend(([self.ModelData(mdata_id)], {
                             'fs_id': fs_id,
                             'model': model,

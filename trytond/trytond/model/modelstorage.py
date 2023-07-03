@@ -4,6 +4,8 @@
 import datetime
 import time
 import csv
+import logging
+import random
 
 from decimal import Decimal
 from itertools import islice, chain
@@ -23,13 +25,18 @@ from trytond.config import config
 from trytond.i18n import gettext, lazy_gettext
 from trytond.transaction import Transaction
 from trytond.pool import Pool
-from trytond.cache import LRUDict, LRUDictTransaction, freeze, unfreeze
+from trytond.cache import Cache, LRUDict, LRUDictTransaction, freeze, unfreeze
 from trytond.rpc import RPC
 from .descriptors import dualmethod
 
 __all__ = ['ModelStorage', 'EvalEnvironment']
 _cache_record = config.getint('cache', 'record')
 _cache_field = config.getint('cache', 'field')
+_cache_count_timeout = config.getint(
+    'cache', 'count_timeout', default=60 * 60 * 24)
+_cache_count_clear = config.getint(
+    'cache', 'count_clear', default=1000)
+_database_timeout = 120
 
 
 class AccessError(UserError):
@@ -109,6 +116,8 @@ class ModelStorage(Model):
     rec_name = fields.Function(
         fields.Char(lazy_gettext('ir.msg_record_name')), 'get_rec_name',
         searcher='search_rec_name')
+    _count_cache = Cache(
+        'modelstorage.count', duration=_cache_count_timeout, context=False)
 
     @classmethod
     def __setup__(cls):
@@ -124,10 +133,13 @@ class ModelStorage(Model):
                     'delete': RPC(readonly=False, instantiate=0),
                     'copy': RPC(readonly=False, instantiate=0, unique=False,
                         result=lambda r: list(map(int, r))),
-                    'search': RPC(result=lambda r: list(map(int, r))),
-                    'search_count': RPC(),
+                    'search': RPC(
+                        result=lambda r: list(map(int, r)),
+                        timeout=_database_timeout),
+                    'search_count': RPC(timeout=_database_timeout),
                     'search_read': RPC(),
-                    'resources': RPC(instantiate=0, unique=False),
+                    'resources': RPC(instantiate=0, unique=False,
+                        timeout=_database_timeout),
                     'export_data_domain': RPC(),
                     'export_data': RPC(instantiate=0, unique=False),
                     'import_data': RPC(readonly=False),
@@ -170,6 +182,13 @@ class ModelStorage(Model):
 
         # Increase transaction counter
         Transaction().counter += 1
+
+        count = cls._count_cache.get(cls.__name__)
+        if count is not None:
+            if random.random() < 1 / _cache_count_clear:
+                cls._count_cache.set(cls.__name__, None)
+            else:
+                cls._count_cache.set(cls.__name__, count + len(vlist))
 
     @classmethod
     @without_check_access
@@ -305,6 +324,13 @@ class ModelStorage(Model):
                     for record in records:
                         if record.id in cache[cls.__name__]:
                             del cache[cls.__name__][record.id]
+
+        count = cls._count_cache.get(cls.__name__)
+        if count is not None:
+            if random.random() < 1 / _cache_count_clear:
+                cls._count_cache.set(cls.__name__, None)
+            else:
+                cls._count_cache.set(cls.__name__, count - len(records))
 
     @classmethod
     @without_check_access
@@ -503,11 +529,12 @@ class ModelStorage(Model):
         return []
 
     @classmethod
-    def search_count(cls, domain):
+    def search_count(cls, domain, offset=0, limit=None):
         '''
         Return the number of records that match the domain.
         '''
-        res = cls.search(domain, order=[], count=True)
+        res = cls.search(
+            domain, order=[], count=True, offset=offset, limit=limit)
         if isinstance(res, list):
             return len(res)
         return res
@@ -562,6 +589,15 @@ class ModelStorage(Model):
                     domain = ['AND', domain, ('active', '=', True)]
             return domain
         return process(domain)
+
+    @classmethod
+    def count(cls):
+        "Returns the estimation of the number of records."
+        count = cls._count_cache.get(cls.__name__)
+        if count is None:
+            count = cls.search([], count=True)
+            cls._count_cache.set(cls.__name__, count)
+        return count
 
     def resources(self):
         pool = Pool()
@@ -656,7 +692,10 @@ class ModelStorage(Model):
                 if descriptor:
                     value = getattr(field, descriptor)().__get__(value, eModel)
                 else:
-                    value = getattr(value, field_name)
+                    try:
+                        value = getattr(value, field_name)
+                    except AccessError:
+                        value = 'UNAUTHORIZED_401'
                 if isinstance(value, (list, tuple)):
                     first = True
                     child_fields_names = [(x[:i + 1] == fields_tree[:i + 1]
@@ -1177,27 +1216,9 @@ class ModelStorage(Model):
                                 [('id', 'in', [r.id for r in sub_relations])],
                                 domain,
                                 ])
-                    invalid_relations = sub_relations - set(finds)
-                    if Relation == cls and field._type not in {
-                            'many2one', 'one2many', 'many2many', 'one2one',
-                            'reference'}:
-                        invalid_records = invalid_relations
-                    elif field._type.endswith('2many'):
-                        invalid_records = [
-                            r for r in records
-                            if invalid_relations.intersection(
-                                getattr(r, field.name))]
-                    else:
-                        invalid_records = [
-                            r for r in records
-                            if getattr(r, field.name) in invalid_relations]
+                    invalid_records = sub_relations - set(finds)
                     if invalid_records:
                         invalid_record = invalid_records.pop()
-                        if invalid_relations == invalid_records:
-                            invalid_relation = invalid_record
-                        else:
-                            invalid_relation = getattr(
-                                invalid_record, field.name)
                         domain = field.domain
                         if is_pyson(domain):
                             domain = _record_eval_pyson(records[0], domain)
@@ -1215,7 +1236,7 @@ class ModelStorage(Model):
                         else:
                             fields.add(field.name)
                         for field_name in sorted(fields):
-                            env = EvalEnvironment(invalid_relation, Relation)
+                            env = EvalEnvironment(invalid_record, Relation)
                             invalid_domain = domain_inversion(
                                 domain, field_name, env)
                             if isinstance(invalid_domain, bool):
@@ -1253,6 +1274,10 @@ class ModelStorage(Model):
                                 and not value)
                             or (field._type == 'reference'
                                 and not isinstance(value, ModelStorage))):
+                        # JCA : Add log to help debugging
+                        logging.getLogger().debug(
+                            'Field %s of %s is required' %
+                            (field_name, cls.__name__))
                         raise RequiredValidationError(
                             gettext('ir.msg_required_validation_record',
                                 **cls.__names__(field_name)))
@@ -1329,6 +1354,10 @@ class ModelStorage(Model):
                 if hasattr(field, 'forbidden_chars'):
                     for record in records:
                         value = getattr(record, field_name)
+                        if value and type(value) != str:
+                            # JMO table.cell overloads read: a char can become
+                            # Decimal
+                            value = str(value)
                         if value and any(
                                 c in value for c in field.forbidden_chars):
                             error_args = cls.__names__(field_name)
@@ -1371,6 +1400,11 @@ class ModelStorage(Model):
                             values = value or []
                         for value in values:
                             if value not in test:
+                                logging.getLogger().debug(
+                                    'Bad Selection : field %s of model %s :'
+                                    ' %s is not in %s' % (
+                                        field_name, cls.__name__, value,
+                                        test))
                                 error_args = cls.__names__(field_name)
                                 error_args['value'] = value
                                 raise SelectionValidationError(gettext(
@@ -1419,7 +1453,7 @@ class ModelStorage(Model):
     def _clean_defaults(cls, defaults):
         pool = Pool()
         vals = {}
-        for field in defaults.keys():
+        for field in list(defaults.keys()):
             if '.' in field:  # skip all related fields
                 continue
             fld_def = cls._fields[field]
@@ -1501,11 +1535,13 @@ class ModelStorage(Model):
             raise AttributeError('"%s" has no attribute "%s"' % (self, name))
 
         try:
-            if field._type not in ('many2one', 'reference'):
+            if field._type not in (
+                    'many2one', 'reference', 'one2many', 'many2many',
+                    'one2one'):
                 # fill local cache for quicker access later
                 value \
-                        = self._local_cache[self.id][name] \
-                        = self._cache[self.id][name]
+                    = self._local_cache[self.id][name] \
+                    = self._cache[self.id][name]
                 return value
             else:
                 skip_eager = name in self._cache[self.id]
@@ -1574,9 +1610,13 @@ class ModelStorage(Model):
                         context_field = self._fields.get(context_field_name)
                         ffields[context_field_name] = context_field
 
+        delete_records = self._transaction.delete_records.get(
+            self.__name__, set())
+
         def filter_(id_):
             return (id_ == self.id  # Ensure the value is read
-                or ((
+                or (id_ not in delete_records
+                    and (
                         id_ not in self._cache
                         or name not in self._cache[id_])
                     and (id_ not in self._local_cache
@@ -1588,15 +1628,19 @@ class ModelStorage(Model):
                 if id_ not in s:
                     s.add(id_)
                     yield id_
+        read_size = max(1, min(
+                self._cache.size_limit, self._local_cache.size_limit,
+                self._transaction.database.IN_MAX))
         index = self._ids.index(self.id)
         ids = chain(islice(self._ids, index, None),
             islice(self._ids, 0, max(index - 1, 0)))
-        ids = islice(unique(filter(filter_, ids)),
-            self._transaction.database.IN_MAX)
+        ids = islice(unique(filter(filter_, ids)), read_size)
 
         def instantiate(field, value, data):
             if field._type in ('many2one', 'one2one', 'reference'):
-                if value is None or value is False:
+                # ABDC: Fix when data is an empty string, we should return
+                # None
+                if value is None or value is False or value == '':
                     return None
             elif field._type in ('one2many', 'many2many'):
                 if not value:
@@ -1648,13 +1692,13 @@ class ModelStorage(Model):
                 self._transaction.set_user(self._user), \
                 self._transaction.reset_context(), \
                 self._transaction.set_context(
-                    self._context, _check_access=False):
+                    self._context, _check_access=False) as transaction:
             if (self.id in self._cache and name in self._cache[self.id]
                     and not require_context_field):
                 # Use values from cache
                 ids = islice(chain(islice(self._ids, index, None),
                         islice(self._ids, 0, max(index - 1, 0))),
-                    self._transaction.database.IN_MAX)
+                    read_size)
                 ffields = {name: ffields[name]}
                 read_data = [{'id': i, name: self._cache[i][name]}
                     for i in ids
@@ -1665,7 +1709,9 @@ class ModelStorage(Model):
                 read_data = self.read(list(index.keys()), list(ffields.keys()))
                 read_data.sort(key=lambda r: index[r['id']])
             # create browse records for 'remote' models
-            no_local_cache = {'one2one', 'one2many', 'many2many', 'binary'}
+            no_local_cache = {'binary'}
+            if not transaction.readonly:
+                no_local_cache |= {'one2one', 'one2many', 'many2many'}
             for data in read_data:
                 id_ = data['id']
                 to_delete = set()
@@ -1686,7 +1732,8 @@ class ModelStorage(Model):
                     if (field._type in no_local_cache
                             or field.context
                             or getattr(field, 'datetime_field', None)
-                            or isinstance(field, fields.Function)):
+                            or (isinstance(field, fields.Function)
+                                and not transaction.readonly)):
                         to_delete.add(fname)
                 self._cache[id_]._update(
                     **{k: v for k, v in data.items() if k not in to_delete})
@@ -1795,30 +1842,34 @@ class ModelStorage(Model):
                         or context != record._context):
                     latter.append(record)
                     continue
-                save_values[record] = record._save_values
-                values[record] = record._values
+                save_values[id(record)] = record._save_values
+                values[id(record)] = record._values
                 record._values = None
                 if record.id is None or record.id < 0:
                     to_create.append(record)
-                elif save_values[record]:
+                elif save_values[id(record)]:
                     to_write.append(record)
+            transaction = Transaction()
             try:
-                with Transaction().set_current_transaction(transaction), \
+                with transaction.set_current_transaction(transaction), \
                         transaction.set_user(user), \
                         transaction.reset_context(), \
                         transaction.set_context(context, _check_access=False):
                     if to_create:
-                        news = cls.create([save_values[r] for r in to_create])
+                        # ABE: use records addresses as keys instead of records
+                        news = cls.create(
+                            [save_values[id(r)] for r in to_create])
                         for record, new in zip(to_create, news):
                             record._ids.remove(record.id)
                             record._id = new.id
                             record._ids.append(record.id)
                     if to_write:
                         cls.write(*sum(
-                                (([r], save_values[r]) for r in to_write), ()))
+                                (([r], save_values[id(r)]) for r in to_write),
+                                ()))
             except Exception:
                 for record in to_create + to_write:
-                    record._values = values[record]
+                    record._values = values[id(record)]
                 raise
             for record in to_create + to_write:
                 record._init_values = None

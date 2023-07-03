@@ -20,8 +20,7 @@ class MultiValueMixin(object):
         Value = self.multivalue_model(field)
         for fname, field in self._fields.items():
             if (field._type == 'one2many'
-                    and field.model_name == Value.__name__
-                    and not field.filter):
+                    and field.model_name == Value.__name__):
                 return getattr(self, fname)
         return Value.search([])
 
@@ -61,7 +60,7 @@ class MultiValueMixin(object):
                 return str(value)
             return value.id
         elif isinstance(value, (list, tuple)):
-            return tuple(r.id if isinstance(r, Model) else r for r in value)
+            return [r.id for r in value]
         else:
             return value
 

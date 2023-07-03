@@ -1,10 +1,11 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 from collections import defaultdict
-import time
 import logging
 import os
 import json
+import time
+import urllib.parse
 import warnings
 from datetime import datetime
 from decimal import Decimal
@@ -16,7 +17,6 @@ try:
 except ImportError:
     from psycopg2cffi import compat
     compat.register()
-except ImportError:
     from psycopg2 import connect
 from psycopg2 import Binary
 from psycopg2.sql import SQL, Identifier
@@ -33,6 +33,11 @@ except ImportError:
 from psycopg2 import IntegrityError as DatabaseIntegrityError
 from psycopg2 import OperationalError as DatabaseOperationalError
 from psycopg2 import ProgrammingError
+try:
+    from psycopg2.errors import QueryCanceled as DatabaseTimeoutError
+except ModuleNotFoundError:
+    # Pypy
+    from psycopg2 import QueryCanceledError as DatabaseTimeoutError
 from psycopg2.extras import register_default_json, register_default_jsonb
 
 from sql import Flavor, Cast, For, Table
@@ -44,7 +49,13 @@ from trytond.backend.database import DatabaseInterface, SQLType
 from trytond.config import config, parse_uri
 from trytond.tools.gevent import is_gevent_monkey_patched
 
-__all__ = ['Database', 'DatabaseIntegrityError', 'DatabaseOperationalError']
+# MAB: Performance analyser tools (See [ec1462afd])
+from trytond.perf_analyzer import analyze_before, analyze_after
+from trytond.perf_analyzer import logger as perf_logger
+
+
+__all__ = ['Database', 'DatabaseIntegrityError', 'DatabaseOperationalError',
+    'DatabaseTimeoutError']
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +64,9 @@ _timeout = config.getint('database', 'timeout')
 _minconn = config.getint('database', 'minconn', default=1)
 _maxconn = config.getint('database', 'maxconn', default=64)
 _default_name = config.get('database', 'default_name', default='template1')
+_slow_threshold = config.getfloat('database', 'log_time_threshold', default=-1)
+_slow_logging_enabled = _slow_threshold > 0 and logger.isEnabledFor(
+    logging.WARNING)
 
 
 def unescape_quote(s):
@@ -74,6 +88,47 @@ class LoggingCursor(cursor):
         cursor.execute(self, sql, args)
 
 
+class PerfCursor(cursor):
+    def execute(self, query, vars=None):
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(self.mogrify(query, vars))
+        try:
+            context = analyze_before(self)
+        except Exception:
+            perf_logger.exception('analyse_before failed')
+            context = None
+
+        # JCA: Log slow queries
+        if _slow_logging_enabled:
+            start = time.time()
+        ret = super(PerfCursor, self).execute(query, vars)
+        if _slow_logging_enabled:
+            end = time.time()
+            if end - start > _slow_threshold:
+                logger.warning('slow:(%s s):%s' % (
+                        end - start, self.mogrify(query, vars)))
+        if context is not None:
+            try:
+                analyze_after(*context)
+            except Exception:
+                perf_logger.exception('analyse_after failed')
+        return ret
+
+    def callproc(self, procname, vars=None):
+        try:
+            context = analyze_before(self)
+        except Exception:
+            perf_logger.exception('analyse_before failed')
+            context = None
+        ret = super(PerfCursor, self).callproc(procname, vars)
+        if context is not None:
+            try:
+                analyze_after(*context)
+            except Exception:
+                perf_logger.exception('analyse_after failed')
+        return ret
+
+
 class ForSkipLocked(For):
     def __str__(self):
         assert not self.nowait, "Can not use both NO WAIT and SKIP LOCKED"
@@ -82,7 +137,7 @@ class ForSkipLocked(For):
 
 class Unaccent(Function):
     __slots__ = ()
-    _function = 'unaccent'
+    _function = config.get('database', 'unaccent_function', default='unaccent')
 
 
 class Similarity(Function):
@@ -230,6 +285,7 @@ class Database(DatabaseInterface):
                     inst._connpool = ThreadedConnectionPool(
                         minconn, _maxconn, **cls._connection_params(name),
                         cursor_factory=LoggingCursor)
+                    logger.info('connected to "%s"', name)
                 except Exception:
                     logger.error(
                         'connection to "%s" failed', name, exc_info=True)
@@ -245,18 +301,29 @@ class Database(DatabaseInterface):
 
     @classmethod
     def _connection_params(cls, name):
+        # JCA: psycopg2cff does not support mixing dsn and other parameters
         uri = parse_uri(config.get('database', 'uri'))
+        qs = urllib.parse.parse_qs(uri.query)
+        qs['fallback_application_name'] = os.environ.get(
+            'TRYTOND_APPNAME', 'trytond')
+        query = urllib.parse.urlencode(qs, doseq=True)
         if uri.path and uri.path != '/':
             warnings.warn("The path specified in the URI will be overridden")
         params = {
-            'dsn': uri._replace(path=name).geturl(),
+            'dsn': uri._replace(path=name, query=query).geturl(),
             }
         return params
+
+    def _kill_session_query(self, database_name):
+        return 'SELECT pg_terminate_backend(pg_stat_activity.pid) ' \
+            'FROM pg_stat_activity WHERE pg_stat_activity.datname = \'%s\'' \
+            ' AND pid <> pg_backend_pid();' % database_name
 
     def connect(self):
         return self
 
-    def get_connection(self, autocommit=False, readonly=False):
+    def get_connection(
+            self, autocommit=False, readonly=False, statement_timeout=None):
         for count in range(config.getint('database', 'retry'), -1, -1):
             try:
                 conn = self._connpool.getconn()
@@ -278,16 +345,27 @@ class Database(DatabaseInterface):
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         else:
             conn.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
+        statements = []
         # psycopg2cffi does not have the readonly property
         if hasattr(conn, 'readonly'):
             conn.readonly = readonly
         elif not autocommit and readonly:
+            statements.append('SET TRANSACTION READ ONLY')
+        if statement_timeout:
+            statements.append(
+                'SET LOCAL statement_timeout=%s' % (statement_timeout * 1000))
+        if statements:
             cursor = conn.cursor()
-            cursor.execute('SET TRANSACTION READ ONLY')
+            cursor.execute(';'.join(statements))
+        conn.cursor_factory = PerfCursor
         return conn
 
     def put_connection(self, connection, close=False):
-        self._connpool.putconn(connection, close=close)
+        try:
+            self._connpool.putconn(connection, close=close)
+        except PoolError:
+            # When cleaning up, the pool may already be closed
+            pass
 
     def close(self):
         with self._lock:
@@ -312,6 +390,8 @@ class Database(DatabaseInterface):
         cursor.execute(SQL("DROP DATABASE {}")
             .format(Identifier(database_name)))
         self.__class__._list_cache.clear()
+        self.__class__._has_proc.pop(database_name, None)
+        self.__class__._search_full_text_languages.pop(database_name, None)
 
     def get_version(self, connection):
         version = connection.server_version
@@ -420,15 +500,12 @@ class Database(DatabaseInterface):
 
     def nextid(self, connection, table):
         cursor = connection.cursor()
-        cursor.execute(
-            "SELECT nextval(format(%s, %s))", ('%I', table + '_id_seq',))
+        cursor.execute("SELECT NEXTVAL(%s)", (table + '_id_seq',))
         return cursor.fetchone()[0]
 
     def setnextid(self, connection, table, value):
         cursor = connection.cursor()
-        cursor.execute(
-            "SELECT setval(format(%s, %s), %s)",
-            ('%I', table + '_id_seq', value))
+        cursor.execute("SELECT SETVAL(%s, %s)", (table + '_id_seq', value))
 
     def currid(self, connection, table):
         cursor = connection.cursor()

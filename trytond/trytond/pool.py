@@ -5,6 +5,7 @@ from threading import RLock
 import logging
 from trytond.modules import load_modules, register_classes
 from trytond.transaction import Transaction
+from trytond.server_context import ServerContext
 import builtins
 
 __all__ = ['Pool', 'PoolMeta', 'PoolBase', 'isregisteredby']
@@ -54,7 +55,10 @@ class Pool(object):
     _pool = {}
     test = False
     _instances = {}
+    _init_hooks = {}
+    _post_init_calls = {}
     _modules = None
+    pool_types = {'model', 'report', 'wizard'}
 
     def __new__(cls, database_name=None):
         if database_name is None:
@@ -75,24 +79,36 @@ class Pool(object):
             database_name = Transaction().database.name
         self.database_name = database_name
 
-    @staticmethod
-    def register(*classes, **kwargs):
+    @classmethod
+    def register(cls, *classes, **kwargs):
         '''
         Register a list of classes
         '''
         module = kwargs['module']
         type_ = kwargs['type_']
         depends = set(kwargs.get('depends', []))
-        assert type_ in ('model', 'report', 'wizard')
+        assert type_ in cls.pool_types
         for cls in classes:
             mpool = Pool.classes[type_][module]
             assert cls not in mpool, cls
             assert issubclass(cls.__class__, PoolMeta), cls
             mpool[cls] = depends
 
+    @classmethod
+    def add_pool_type(cls, type):
+        cls.pool_types.add(type)
+        if type not in cls.classes:
+            cls.classes[type] = defaultdict(OrderedDict)
+
     @staticmethod
     def register_mixin(mixin, classinfo, module):
         Pool.classes_mixin[module].append((classinfo, mixin))
+
+    @staticmethod
+    def register_post_init_hooks(*hooks, **kwargs):
+        if kwargs['module'] not in Pool._init_hooks:
+            Pool._init_hooks[kwargs['module']] = []
+        Pool._init_hooks[kwargs['module']] += hooks
 
     @classmethod
     def start(cls):
@@ -102,6 +118,7 @@ class Pool(object):
         with cls._lock:
             for classes in Pool.classes.values():
                 classes.clear()
+            cls._init_hooks = {}
             register_classes()
             cls._started = True
 
@@ -127,7 +144,7 @@ class Pool(object):
         '''
         with cls._lock:
             databases = []
-            for database in cls._pool.keys():
+            for database in list(cls._pool.keys()):
                 if cls._locks.get(database):
                     if cls._locks[database].acquire(False):
                         databases.append(database)
@@ -150,6 +167,7 @@ class Pool(object):
         with self._lock:
             if not self._started:
                 self.start()
+
         with self._locks[self.database_name]:
             # Don't reset pool if already init and not to update
             if not update and self._pool.get(self.database_name):
@@ -160,16 +178,22 @@ class Pool(object):
             # Clean the _pool before loading modules
             for type in self.classes.keys():
                 self._pool[self.database_name][type] = {}
+            self._post_init_calls[self.database_name] = []
             try:
-                restart = not load_modules(
-                    self.database_name, self, update=update, lang=lang,
-                    activatedeps=activatedeps)
+                with ServerContext().set_context(disable_auto_cache=True):
+                    restart = not load_modules(
+                        self.database_name, self, update=update, lang=lang,
+                        activatedeps=activatedeps)
             except Exception:
                 del self._pool[self.database_name]
                 self._modules = None
                 raise
             if restart:
                 self.init()
+
+    def post_init(self, update):
+        for hook in self._post_init_calls[self.database_name]:
+            hook(self, update)
 
     def get(self, name, type='model'):
         '''
@@ -180,7 +204,7 @@ class Pool(object):
         :return: the instance
         '''
         if type == '*':
-            for type in self.classes.keys():
+            for type in list(self.classes.keys()):
                 if name in self._pool[self.database_name][type]:
                     break
         try:
@@ -220,7 +244,7 @@ class Pool(object):
         Return a list of classes for each type in a dictionary.
         '''
         classes = {}
-        for type_ in self.classes.keys():
+        for type_ in list(self.classes.keys()):
             classes[type_] = []
             for cls, depends in self.classes[type_].get(module, {}).items():
                 if not depends.issubset(modules):
@@ -234,6 +258,8 @@ class Pool(object):
                 assert issubclass(cls, PoolBase), cls
                 self.add(cls, type=type_)
                 classes[type_].append(cls)
+        self._post_init_calls[self.database_name] += self._init_hooks.get(
+            module, [])
         self._modules.append(module)
         return classes
 
@@ -256,7 +282,7 @@ class Pool(object):
             types = [type]
         else:
             types = self.classes.keys()
-        for module in self._modules:
+        for module in modules:
             if module not in self.classes_mixin:
                 continue
             for type_ in types:

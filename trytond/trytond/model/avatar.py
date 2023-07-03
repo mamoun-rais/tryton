@@ -67,15 +67,6 @@ def avatar_mixin(size=64, default=None):
                     record.avatar = avatar
             cls.save(records)
 
-        @classmethod
-        def copy(cls, avatars, default=None):
-            if default is None:
-                default = {}
-            else:
-                default = default.copy()
-            default.setdefault('avatars', [])
-            return super().copy(avatars, default=default)
-
         if default:
 
             @classmethod
