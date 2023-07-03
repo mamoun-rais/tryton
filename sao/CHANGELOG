@@ -1,28 +1,3 @@
-Version 5.2.20 - 2020-07-16
-* Bug fixes (see mercurial logs for details)
-
-Version 5.2.19 - 2020-07-10
-* Bug fixes (see mercurial logs for details)
-* Sanitize translated RichtText fields content (issue9453)
-
-Version 5.2.18 - 2020-06-29
-* Bug fixes (see mercurial logs for details)
-* Sanitize RichtText fields content (issue9405)
-* Escape external string (issue9394)
-
-Version 5.2.17 - 2020-06-16
-* Bug fixes (see mercurial logs for details)
-
-Version 5.2.16 - 2020-06-03
-* Bug fixes (see mercurial logs for details)
-
-Version 5.2.15 - 2020-05-26
-* Bug fixes (see mercurial logs for details)
-* Escape external strings (issue9351)
-
-Version 5.2.14 - 2020-05-01
-* Bug fixes (see mercurial logs for details)
-
 Version 5.2.13 - 2020-03-15
 * Bug fixes (see mercurial logs for details)
 
@@ -32,6 +7,8 @@ Version 5.2.12 - 2020-03-09
 
 Version 5.2.11 - 2020-02-02
 * Bug fixes (see mercurial logs for details)
+
+* Add MultiSelection entries to Dict field
 
 Version 5.2.10 - 2019-12-16
 * Bug fixes (see mercurial logs for details)
@@ -115,6 +92,35 @@ Version 5.0.0 - 2018-10-01
 * Increase the space available for tab list
 * Allow to toggle menu on large screen
 * Manage URL and history
+
+* BUG#10127 Clean session if local session is wrong and we got an ir.session error
+* BUG#10098 Allow list view when Ctrl+click
+* BUG#9909 Autorefresh modal codeMirror using addon
+* BUG#9960 Correctly set operand for M2M and O2M size_limt
+* BUG#9293 Add linting to rule algorithms
+* BUG#9680 Remove text color change on dropdown menu when hover element
+* BUG#9678 Set default color on btn-primary
+* BUG#9457 Apply factor on domain parser
+* BUG#9504 Load CodeMiror inside Docker
+* BUG#9468 Fix file extension missing when using excel export from tree view
+* BUG#9467 Display total sum of commission
+* BUG#9446 Only set width 100 to inputfrom inside dict
+* BUG#8756 Only open link when using ctrl key
+* BUG#9035 Remove checkbox for always ignoring warnings
+* FEA#8271 Add support of expand attribute on group tag
+* FEA#8785 Change title to Coog in the Sao browser
+* FEA#7941 Add keyword attribute to button tag
+* OTH#0000 Correct grunt installation steps in README
+* BUG#8817 Fix width of selection input
+* BUG#8840 Show scrollbar on modal
+* BUG#8839 Allow link inside modal
+* BUG#8810 Prevent crash on selection of m2m in form view
+* BUG#8779 Use input number and toLocaleString for numeric fields
+* BUG#8720 Prevent call to focus when not defined on widget
+* BUG#8703 Show visible boolean extra data
+* BUG#8705 Add white color for link
+* BUG#8706 Remove link when line is not selected
+* BUG#7226 Hide selection state
 
 Version 4.8.0 - 2018-04-23
 * Bug fixes (see mercurial logs for details)

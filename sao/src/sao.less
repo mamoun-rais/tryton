@@ -1,5 +1,6 @@
 @import "variables";
 @import "mixins";
+@import "src/coopengo.less";
 
 #tablist > li > a {
     border: 0;
@@ -86,6 +87,10 @@
 
     .navbar-btn {
         .badge {
+            /*  [Coog specific] remove padding to not increase size of navbar-btn
+            margin-top: -3px;
+            margin-bottom: -3px;
+            */
             position: absolute;
             top: -5px;
             right: -5px;
@@ -156,7 +161,6 @@ input[type='color'] {
         height: 100%;
         opacity: 0;
         cursor: pointer;
-
         li& {
             top: auto;
             height: auto;
@@ -258,6 +262,10 @@ img.icon {
         }
 
         tr.more-row {
+            text-align: center;
+        }
+
+        & tr.more-row {
             text-align: center;
         }
     }
@@ -391,6 +399,7 @@ img.icon {
     }
     .form-many2one > .input-group {
         width: 100%;
+        min-width: 12em;
     }
     td.form-one2many, td.form-many2many {
         vertical-align: top;

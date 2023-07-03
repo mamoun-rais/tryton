@@ -519,7 +519,19 @@
             this.exception = false;
         },
         has_changed: function() {
-            return !jQuery.isEmptyObject(this._changed);
+            var result = !jQuery.isEmptyObject(this._changed);
+            // JCA : #15014 Add a way to make sure some fields are always
+            // ignored when detecting whether the record needs saving or not
+            if (result === false) {
+                return result;
+            }
+            return Object.keys(this._changed).some(
+          this.check_field_never_modified.bind(this));
+        },
+        check_field_never_modified: function(field) {
+            var fields = this.group.model.fields;
+            return !Object.keys(fields).includes(field) ||
+                !fields[field].description.never_modified;
         },
         save: function(force_reload) {
             if (force_reload === undefined) {
@@ -630,6 +642,7 @@
                     fnames.push(fname);
                 }
             }
+
             var fnames_to_fetch = fnames.slice();
             var rec_named_fields = ['many2one', 'one2one', 'reference'];
             for (var i in fnames) {
@@ -2319,9 +2332,6 @@
         set_state: function(record, states) {
             this._set_default_value(record);
             Sao.field.One2Many._super.set_state.call(this, record, states);
-        },
-        _is_empty: function(record) {
-            return jQuery.isEmptyObject(this.get_eval(record));
         }
     });
 
@@ -2349,6 +2359,10 @@
                 record._values[this.name][1] !== null &&
                 record._values[this.name][1] >= -1) {
                 return record._values[this.name].join(',');
+            }
+            // JMO: temporary fix for #14945
+            if (typeof record._values[this.name] === 'string') {
+              return record._values[this.name];
             }
             return null;
         },

@@ -255,9 +255,7 @@
                    this.screen.view_name == 'calendar') {
                 element.find('.fc-time').remove();
             }
-            element.find('.fc-content')
-                .append(jQuery('<div/>', {'class': 'fc-description'})
-                    .text(event.description));
+            element.append(event.description);
             element.css('white-space', 'pre');
             var model_access = Sao.common.MODELACCESS.get(
             	this.screen.model_name);

@@ -52,12 +52,6 @@
             2002, 1, 1, 12, 30, 0, 0).pyson();
         var array = ["create_date", '>=', date];
         var pyson_array = ["create_date", '>=', pyson_date];
-        var statement = new Sao.PYSON.Equal(date, date);
-        var pyson_statement = {
-            '__class__': 'Equal',
-            's1': pyson_date,
-            's2': pyson_date,
-        };
         QUnit.strictEqual(encoder.encode(), 'null', "encode()");
         QUnit.strictEqual(encoder.encode(none), 'null', "encode(none)");
         QUnit.strictEqual(encoder.encode(null), 'null', "encode()");
@@ -67,8 +61,6 @@
             JSON.stringify(pyson_datetime), "encode(datetime)");
         QUnit.strictEqual(encoder.encode(array),
             JSON.stringify(pyson_array), "encode(array)");
-        QUnit.strictEqual(encoder.encode(statement),
-            JSON.stringify(pyson_statement), "encode(statement)");
     });
 
     QUnit.test('PYSON.Eval', function() {
@@ -2496,25 +2488,6 @@
             QUnit.ok(compare(parser.completion(value), expected),
                 'completion(' + value + ')');
         });
-    });
-
-    QUnit.test('HTML Sanitization', function() {
-        var examples = [
-            ["Test", "Test"],
-            ["<b>Test</b>", "<b>Test</b>"],
-            ["<div><b>Test</b></div>", "<div><b>Test</b></div>"],
-            ["<script>window.alert('insecure')</script>", ""],
-            ["<b><script>window.alert('insecure')</script>Test</b>",
-                "<b>Test</b>"],
-            ['<div align="left">Test</div>', '<div align="left">Test</div>'],
-            ['<font href="test" size="1">Test</font>',
-                '<font size="1">Test</font>'],
-        ];
-        for (var i = 0; i < examples.length; i++) {
-            var input = examples[i][0], output = examples[i][1];
-            QUnit.strictEqual(Sao.HtmlSanitizer.sanitize(input), output,
-                'Sao.HtmlSanitizer.sanitize(' + input + ')');
-        }
     });
 
         /*

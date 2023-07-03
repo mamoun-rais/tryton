@@ -136,7 +136,7 @@
         }).append(jQuery('<label/>', {
             'class': 'control-label',
             'for': 'database'
-        }).text(Sao.i18n.gettext('Database')))
+        }).append(Sao.i18n.gettext('Database')))
         .append(dialog.database_select)
         .append(dialog.database_input)
         ).append(jQuery('<div/>', {
@@ -144,13 +144,13 @@
         }).append(jQuery('<label/>', {
             'class': 'control-label',
             'for': 'login'
-        }).text(Sao.i18n.gettext('User name')))
+        }).append(Sao.i18n.gettext('User name')))
         .append(dialog.login_input)
         );
         dialog.button = jQuery('<button/>', {
             'class': 'btn btn-primary',
             'type': 'submit'
-        }).text(' ' + Sao.i18n.gettext("Login")).appendTo(dialog.footer);
+        }).append(' ' + Sao.i18n.gettext("Login")).appendTo(dialog.footer);
         return dialog;
     };
 
@@ -167,6 +167,7 @@
             dfd.resolve(session);
             return dfd;
         }
+
         var dialog = Sao.Session.login_dialog();
 
         var empty_field = function() {

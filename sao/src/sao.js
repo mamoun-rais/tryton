@@ -279,9 +279,9 @@ var Sao = {};
     Sao.config = {};
     Sao.config.limit = 1000;
     Sao.config.display_size = 20;
-    Sao.config.bug_url = 'https://bugs.tryton.org/';
-    Sao.config.title = 'Tryton';
-    Sao.config.icon_colors = '#3465a4,#555753,#cc0000'.split(',');
+    Sao.config.bug_url = 'https://support.coopengo.com/';
+    Sao.config.title = 'Coog';
+    Sao.config.icon_colors = '#0094d2,#555753,#cc0000'.split(',');
     Sao.config.bus_timeout = 10 * 60 * 1000;
 
     Sao.i18n = i18n();
@@ -348,10 +348,11 @@ var Sao = {};
                         Sao.Action.execute(action_id, {}, null, {});
                     });
                     Sao.set_title();
+                    /* Coog: avoid icon filled with standard color
                     Sao.common.ICONFACTORY.get_icon_url('tryton-menu')
                         .then(function(url) {
                             jQuery('.navbar-brand > img').attr('src', url);
-                        });
+                        }); */
                     var new_lang = preferences.language != Sao.i18n.getLocale();
                     var prm = jQuery.Deferred();
                     Sao.i18n.setlang(preferences.language).always(function() {
@@ -669,7 +670,7 @@ var Sao = {};
         }).click(function(evt) {
             evt.preventDefault();
             Sao.preferences();
-        }).text(preferences.status_bar));
+        }).append(preferences.status_bar));
         var title = Sao.i18n.gettext("Logout");
         jQuery('#user-logout').append(jQuery('<a/>', {
             'href': '#',
@@ -720,7 +721,8 @@ var Sao = {};
             'view_ids': view_ids,
             'domain': domain,
             'context': action_ctx,
-            'selection_mode': Sao.common.SELECTION_NONE,
+            // [Coog Specific] dbclick on menu entries
+            'selection_mode': Sao.common.SELECTION_SINGLE,
             'limit': null,
             'row_activate': Sao.main_menu_row_activate,
         });
@@ -858,7 +860,7 @@ var Sao = {};
         add_title: function(title) {
             this.header.append(jQuery('<h4/>', {
                 'class': 'modal-title'
-            }).text(title));
+            }).append(title));
         }
     });
 
@@ -908,7 +910,7 @@ var Sao = {};
         format: function(content) {
             var el = jQuery('<div/>');
             Sao.common.ICONFACTORY.get_icon_img(
-                content.icon, {'class': 'global_search-icon'})
+                content.icon, {'class': 'global-search-icon'})
                 .appendTo(el);
             jQuery('<span/>', {
                 'class': 'global-search-text'
@@ -1094,18 +1096,18 @@ var Sao = {};
         var global_shortcuts_dl = jQuery('<dl/>', {
             'class': 'dl-horizontal col-md-6'
         }).append(jQuery('<h5/>')
-            .text(Sao.i18n.gettext('Global shortcuts')))
+                  .append(Sao.i18n.gettext('Global shortcuts')))
             .appendTo(row);
         var tab_shortcuts_dl = jQuery('<dl/>', {
             'class': 'dl-horizontal col-md-6'
         }).append(jQuery('<h5/>')
-            .text(Sao.i18n.gettext('Tab shortcuts')))
-            .appendTo(row);
+            .append(Sao.i18n.gettext('Tab shortcuts')))
+        .appendTo(row);
 
         shortcuts_defs().forEach(function(definition) {
-            var dt = jQuery('<dt/>').text(definition.label);
+            var dt = jQuery('<dt/>').append(definition.label);
             var dd = jQuery('<dd/>').append(jQuery('<kbd>')
-                .text(definition.shortcut));
+                .append(definition.shortcut));
             var dest_dl;
             if (definition.id) {
                 dest_dl = tab_shortcuts_dl;

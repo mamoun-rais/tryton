@@ -23,8 +23,7 @@ module.exports = function(grunt) {
       'src/wizard.js',
       'src/board.js',
       'src/bus.js',
-      'src/plugins.js',
-      'src/html_sanitizer.js'
+      'src/plugins.js'
   ];
 
   // Project configuration.
@@ -103,6 +102,7 @@ module.exports = function(grunt) {
                 paths: ['src', 'bower_components/bootstrap/less']
             },
             files: {
+                'dist/coog-sao.css': 'theme/coog/coog-sao.less',
                 'dist/<%= pkg.name %>.css': 'src/*.less'
             }
         },
@@ -112,6 +112,7 @@ module.exports = function(grunt) {
                 yuicompress: true
             },
             files: {
+                'dist/coog-sao.min.css': 'theme/coog/coog-sao.less',
                 'dist/<%= pkg.name %>.min.css': 'src/*.less'
             }
         }

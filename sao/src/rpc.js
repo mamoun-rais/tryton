@@ -84,6 +84,15 @@
                                 'tryton-warning').always(dfd.reject);
                         return;
                     }
+                // PKUNK Fix#10127
+                } else if (data.error[0] == "'ir.session'") {
+                    return session.do_logout()
+                        .then(Sao.Session.get_credentials()
+                            .then(function(session) {
+                                Sao.Session.current_session = session;
+                                dfd.resolve();
+                            })
+                        );
                 } else {
                     Sao.common.error.run(data.error[0], data.error[1]);
                 }

@@ -87,7 +87,7 @@
                 dialog.footer.append(jQuery('<button/>', {
                     'class': 'btn btn-link',
                     'type': 'button'
-                }).text(button_text).click(function() {
+                }).append(button_text).click(function() {
                     this.response('RESPONSE_CANCEL');
                 }.bind(this)));
             }
@@ -96,7 +96,7 @@
                 dialog.footer.append(jQuery('<button/>', {
                     'class': 'btn btn-default',
                     'type': 'button'
-                }).text(Sao.i18n.gettext('New')).click(function() {
+                }).append(Sao.i18n.gettext('New')).click(function() {
                     this.response('RESPONSE_ACCEPT');
                 }.bind(this)));
             }
@@ -105,12 +105,12 @@
                 dialog.footer.append(jQuery('<button/>', {
                     'class': 'btn btn-primary',
                     'type': 'submit'
-                }).text(Sao.i18n.gettext('Save')));
+                }).append(Sao.i18n.gettext('Save')));
             } else {
                 dialog.footer.append(jQuery('<button/>', {
                     'class': 'btn btn-primary',
                     'type': 'submit'
-                }).text(Sao.i18n.gettext('OK')));
+                }).append(Sao.i18n.gettext('OK')));
             }
             dialog.content.submit(function(e) {
                 this.response('RESPONSE_OK');
@@ -205,8 +205,10 @@
                     'class': 'btn btn-default btn-sm',
                     'type': 'button',
                     'aria-label': Sao.i18n.gettext('New')
-                }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-create')
-                ).appendTo(buttons);
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-plus'
+                })).appendTo(buttons);
                 this.but_new.click(disable_during(this.new_.bind(this)));
                 this.but_new.prop('disabled', !access.create || readonly);
 
@@ -227,6 +229,16 @@
                 ).appendTo(buttons);
                 this.but_undel.click(disable_during(this.undelete.bind(this)));
                 this.but_undel.prop('disabled', !access['delete'] || readonly);
+
+                this.but_switch = jQuery('<button/>', {
+                    'class': 'btn btn-default btn-sm',
+                    'type': 'button',
+                    'aria-label': Sao.i18n.gettext('Switch')
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-resize-full'
+                })).appendTo(buttons);
+                this.but_switch.click(this.switch_.bind(this));
 
                 this.screen.message_callback = this.record_label.bind(this);
             }
@@ -598,27 +610,27 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.response('RESPONSE_CANCEL');
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-default',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Find')).click(function() {
+            }).append(Sao.i18n.gettext('Find')).click(function() {
                 this.response('RESPONSE_APPLY');
             }.bind(this)).appendTo(dialog.footer);
             if (kwargs.new_ && Sao.common.MODELACCESS.get(model).create) {
                 jQuery('<button/>', {
                     'class': 'btn btn-default',
                     'type': 'button'
-                }).text(Sao.i18n.gettext('New')).click(function() {
+                }).append(Sao.i18n.gettext('New')).click(function() {
                     this.response('RESPONSE_ACCEPT');
                 }.bind(this)).appendTo(dialog.footer);
             }
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'submit'
-            }).text(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
+            }).append(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
             dialog.content.submit(function(e) {
                 this.response('RESPONSE_OK');
                 e.preventDefault();
@@ -719,13 +731,13 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.response('RESPONSE_CANCEL');
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'submit'
-            }).text(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
+            }).append(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
             dialog.content.submit(function(e) {
                 this.response('RESPONSE_OK');
                 e.preventDefault();
@@ -802,13 +814,13 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.response('RESPONSE_CANCEL');
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'submit'
-            }).text(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
+            }).append(Sao.i18n.gettext('OK')).appendTo(dialog.footer);
             dialog.content.submit(function(e) {
                 this.response('RESPONSE_OK');
                 e.preventDefault();
@@ -915,14 +927,14 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function(){
+            }).append(Sao.i18n.gettext('Cancel')).click(function(){
                 this.response('RESPONSE_CANCEL');
             }.bind(this)).appendTo(this.dialog.footer);
 
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'submit'
-            }).text(Sao.i18n.gettext('OK')).click(function(e){
+            }).append(Sao.i18n.gettext('OK')).click(function(e){
                 this.response('RESPONSE_OK');
                 e.preventDefault();
             }.bind(this)).appendTo(this.dialog.footer);
@@ -960,34 +972,31 @@
             var button_add = jQuery('<button/>', {
                 'class': 'btn btn-default btn-block',
                 'type': 'button'
-            }).text(' ' + Sao.i18n.gettext('Add')).prepend(
-                Sao.common.ICONFACTORY.get_icon_img('tryton-add')
+            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-add')
             ).click(function(){
                 this.fields_all.find('.bg-primary').each(function(i, el_field) {
                     this.sig_sel_add(el_field);
                 }.bind(this));
-            }.bind(this))
+            }.bind(this)).append(' '+Sao.i18n.gettext('Add'))
             .appendTo(this.column_buttons);
 
             jQuery('<button/>', {
                 'class': 'btn btn-default btn-block',
                 'type': 'button'
-            }).text(' ' + Sao.i18n.gettext('Remove')).prepend(
-                Sao.common.ICONFACTORY.get_icon_img('tryton-remove')
+            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-remove')
             ).click(function(){
                 // sig_unsel
                 this.fields_selected.children('li.bg-primary').remove();
-            }.bind(this))
+            }.bind(this)).append(' '+Sao.i18n.gettext('Remove'))
             .appendTo(this.column_buttons);
 
             jQuery('<button/>', {
                 'class': 'btn btn-default btn-block',
                 'type': 'button'
-            }).text(' ' + Sao.i18n.gettext('Clear')).prepend(
-                Sao.common.ICONFACTORY.get_icon_img('tryton-clear')
+            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-clear')
             ).click(function(){
                 this.fields_selected.empty();
-            }.bind(this))
+            }.bind(this)).append(' '+Sao.i18n.gettext('Clear'))
             .appendTo(this.column_buttons);
 
             jQuery('<hr>').appendTo(this.column_buttons);
@@ -1100,7 +1109,7 @@
             for(var i=0; i<this.encodings.length; i++) {
                 jQuery('<option/>', {
                     'val': this.encodings[i]
-                }).append(this.encodings[i]).appendTo(this.el_csv_encoding);
+                }).html(this.encodings[i]).appendTo(this.el_csv_encoding);
             }
 
             var enc = 'utf-8';
@@ -1154,11 +1163,10 @@
             jQuery('<button/>', {
                 'class': 'btn btn-default btn-block',
                 'type': 'button'
-            }).text(' ' + Sao.i18n.gettext('Auto-Detect')).prepend(
-                Sao.common.ICONFACTORY.get_icon_img('tryton-search')
+            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-search')
             ).click(function(){
                 this.autodetect();
-            }.bind(this))
+            }.bind(this)).append(' '+Sao.i18n.gettext('Auto-Detect'))
             .appendTo(this.column_buttons);
 
             var chooser_label = jQuery('<label/>', {
@@ -1204,7 +1212,7 @@
             var field = el_field.attr('field');
             var node = jQuery('<li/>', {
                 'field': field,
-            }).text(el_field.attr('name')).click(function(e) {
+            }).html(el_field.attr('name')).click(function(e) {
                 if (e.ctrlKey) {
                     node.toggleClass('bg-primary');
                 } else {
@@ -1228,7 +1236,7 @@
                 var node = jQuery('<li/>', {
                     'field': parent_node[field].field,
                     'name': parent_node[field].name
-                }).text(name).click(function(e) {
+                }).html(name).click(function(e) {
                     if(e.ctrlKey) {
                         node.toggleClass('bg-primary');
                     } else {
@@ -1359,7 +1367,7 @@
             }
             var node = jQuery('<li/>', {
                 'field': field
-            }).text(name).click(function(){
+            }).html(name).click(function(){
                 node.addClass('bg-primary')
                     .siblings().removeClass('bg-primary');
             }).appendTo(this.fields_selected);
@@ -1468,21 +1476,19 @@
             jQuery('<button/>', {
                 'class': 'btn btn-default btn-block',
                 'type': 'button'
-            }).text(' ' + Sao.i18n.gettext('Save Export')).prepend(
-                Sao.common.ICONFACTORY.get_icon_img('tryton-save')
+            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-save')
             ).click(function(){
                 this.addreplace_predef();
-            }.bind(this))
+            }.bind(this)).append(' '+Sao.i18n.gettext('Save Export'))
             .appendTo(this.column_buttons);
 
             jQuery('<button/>', {
                 'class': 'btn btn-default btn-block',
                 'type': 'button'
-            }).text(' ' + Sao.i18n.gettext('Delete Export')).prepend(
-                Sao.common.ICONFACTORY.get_icon_img('tryton-delete')
+            }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-delete')
             ).click(function(){
                 this.remove_predef();
-            }.bind(this))
+            }.bind(this)).append(' '+Sao.i18n.gettext('Delete Export'))
             .appendTo(this.column_buttons);
 
             var predefined_exports_column = jQuery('<div/>', {
@@ -1537,7 +1543,7 @@
                 var path = parent_node[name].path;
                 var node = jQuery('<li/>', {
                     'path': path
-                }).text(parent_node[name].string).click(function(e) {
+                }).html(parent_node[name].string).click(function(e) {
                     if(e.ctrlKey) {
                         node.toggleClass('bg-primary');
                     } else {
@@ -1803,7 +1809,7 @@
             }
             var node = jQuery('<li/>', {
                 'path': name,
-            }).text(long_string).click(function(e) {
+            }).html(long_string).click(function(e) {
                 if(e.ctrlKey) {
                     node.toggleClass('bg-primary');
                 } else {

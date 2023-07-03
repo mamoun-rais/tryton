@@ -124,12 +124,12 @@
             jQuery('<div/>', {
                 'class': 'checkbox'
             }).append(jQuery('<label/>')
-                .text(' ' + k)
-                .prepend(jQuery('<input/>', {
+                .append(jQuery('<input/>', {
                     'type': 'radio',
                     'name': 'selection',
                     'value': i
-                })))
+                }))
+                .append(' ' + k))
             .appendTo(dialog.body);
         });
         dialog.body.find('input').first().prop('checked', true);
@@ -137,14 +137,14 @@
         jQuery('<button/>', {
             'class': 'btn btn-link',
             'type': 'button'
-        }).text(Sao.i18n.gettext('Cancel')).click(function() {
+        }).append(Sao.i18n.gettext('Cancel')).click(function() {
             dialog.modal.modal('hide');
             prm.fail();
         }).appendTo(dialog.footer);
         jQuery('<button/>', {
             'class': 'btn btn-primary',
             'type': 'button'
-        }).text(Sao.i18n.gettext('OK')).click(function() {
+        }).append(Sao.i18n.gettext('OK')).click(function() {
             var i = dialog.body.find('input:checked').attr('value');
             dialog.modal.modal('hide');
             prm.resolve(values[keys[i]]);
@@ -754,7 +754,7 @@
                 this.el = el;
             } else {
                 this.el = jQuery('<button/>');
-                this.el.text(attributes.string || '');
+                this.el.append(attributes.string || '');
                 if (this.attributes.rule) {
                     this.el.append(' ').append(jQuery('<span/>', {
                         'class': 'badge'
@@ -2770,7 +2770,7 @@
         },
         get_icon_url: function(icon_name) {
             if (!icon_name) {
-                return;
+                return jQuery.when('');
             }
             return this.register_icon(icon_name).then(function() {
                 if (icon_name in this.loaded_icons) {
@@ -2852,14 +2852,14 @@
                 'aria-hidden': true,
             })).append(jQuery('<span/>', {
                 'class': 'sr-only'
-            }).text(Sao.i18n.gettext('Message: '))
+            }).append(Sao.i18n.gettext('Message: '))
             ).append(jQuery('<span/>')
-                .text(message)
+                .append(message)
                 .css('white-space', 'pre-wrap')));
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('OK')).click(function() {
+            }).append(Sao.i18n.gettext('OK')).click(function() {
                 this.close(dialog);
                 prm.resolve('ok');
             }.bind(this)).appendTo(dialog.footer);
@@ -2884,20 +2884,20 @@
                 'aria-hidden': true,
             })).append(jQuery('<span/>', {
                 'class': 'sr-only'
-            }).text(Sao.i18n.gettext('Warning: '))
+            }).append(Sao.i18n.gettext('Warning: '))
             ).append(jQuery('<h4/>')
-                .text(title)
+                .append(title)
                 .css('white-space', 'pre-wrap'));
             if (message) {
                 content.append(jQuery('<span/>')
-                    .text(message)
+                    .append(message)
                     .css('white-space', 'pre-wrap'));
             }
             dialog.body.append(content);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('OK')).click(function() {
+            }).append(Sao.i18n.gettext('OK')).click(function() {
                 this.close(dialog);
                 prm.resolve('ok');
             }.bind(this)).appendTo(dialog.footer);
@@ -2911,33 +2911,35 @@
         build_dialog: function(message, title, prm) {
             var dialog = Sao.common.UserWarningDialog._super.build_dialog.call(
                 this, message, title, prm);
-            var always = jQuery('<input/>', {
-                'type': 'checkbox'
-            });
-            dialog.body.append(jQuery('<div/>', {
-                'class': 'checkbox',
-            }).append(jQuery('<label/>')
-                .append(always)
-                .text(Sao.i18n.gettext('Always ignore this warning.')))
-            );
+            // Coog specific : do not display this warning cf bug #9035
+            // var always = jQuery('<input/>', {
+            //     'type': 'checkbox'
+            // });
+            // dialog.body.append(jQuery('<div/>', {
+            //     'class': 'checkbox',
+            // }).append(jQuery('<label/>')
+            //     .append(always)
+            //     .append(Sao.i18n.gettext('Always ignore this warning.')))
+            // );
             dialog.body.append(jQuery('<p/>')
                     .text(Sao.i18n.gettext('Do you want to proceed?')));
             dialog.footer.children().remove();
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('No')).click(function() {
+            }).append(Sao.i18n.gettext('No')).click(function() {
                 this.close(dialog);
                 prm.reject();
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Yes')).click(function() {
+            }).append(Sao.i18n.gettext('Yes')).click(function() {
                 this.close(dialog);
-                if (always.prop('checked')) {
-                    prm.resolve('always');
-                }
+                // Coog specific : always is not displayed cf bug #9035
+                // if (always.prop('checked')) {
+                //     prm.resolve('always');
+                // }
                 prm.resolve('ok');
             }.bind(this)).appendTo(dialog.footer);
             return dialog;
@@ -2958,9 +2960,9 @@
                 'aria-hidden': true,
             })).append(jQuery('<span/>', {
                 'class': 'sr-only'
-            }).text(Sao.i18n.gettext('Confirmation: '))
+            }).append(Sao.i18n.gettext('Confirmation: '))
             ).append(jQuery('<span/>')
-                .text(message)
+                .append(message)
                 .css('white-space', 'pre-wrap')));
             return dialog;
         }
@@ -2973,14 +2975,14 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.close(dialog);
                 prm.reject();
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('OK')).click(function() {
+            }).append(Sao.i18n.gettext('OK')).click(function() {
                 this.close(dialog);
                 prm.resolve();
             }.bind(this)).appendTo(dialog.footer);
@@ -2996,21 +2998,21 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.close(dialog);
                 prm.resolve('cancel');
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-default',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('No')).click(function() {
+            }).append(Sao.i18n.gettext('No')).click(function() {
                 this.close(dialog);
                 prm.resolve('ko');
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Yes')).click(function() {
+            }).append(Sao.i18n.gettext('Yes')).click(function() {
                 this.close(dialog);
                 prm.resolve('ok');
             }.bind(this)).appendTo(dialog.footer);
@@ -3040,18 +3042,18 @@
                 'class': 'form-group'
             }).append(jQuery('<label/>', {
                 'for': 'ask-dialog-entry'
-            }).text(question)).append(entry));
+            }).append(question)).append(entry));
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.close(dialog);
                 prm.reject();
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('OK')).click(function() {
+            }).append(Sao.i18n.gettext('OK')).click(function() {
                 this.close(dialog);
                 prm.resolve(entry.val());
             }.bind(this)).appendTo(dialog.footer);
@@ -3076,8 +3078,8 @@
                     'aria-hidden': true,
                 })).append(jQuery('<span/>', {
                     'class': 'sr-only'
-                }).text(Sao.i18n.gettext('Write Concurrency Warning: '))
-                ).text(Sao.i18n.gettext('This record has been modified ' +
+                }).append(Sao.i18n.gettext('Write Concurrency Warning: '))
+                ).append(Sao.i18n.gettext('This record has been modified ' +
                 'while you were editing it.')))
                 .append(jQuery('<p/>').text(Sao.i18n.gettext('Choose:')))
                 .append(jQuery('<ul/>')
@@ -3093,14 +3095,14 @@
             jQuery('<button/>', {
                 'class': 'btn btn-link',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Cancel')).click(function() {
+            }).append(Sao.i18n.gettext('Cancel')).click(function() {
                 this.close(dialog);
                 prm.reject();
             }.bind(this)).appendTo(dialog.footer);
             jQuery('<button/>', {
                 'class': 'btn btn-default',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Compare')).click(function() {
+            }).append(Sao.i18n.gettext('Compare')).click(function() {
                 this.close(dialog);
                 Sao.Tab.create({
                     'model': model,
@@ -3114,7 +3116,7 @@
             jQuery('<button/>', {
                 'class': 'btn btn-default',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Write Anyway')).click(function() {
+            }).append(Sao.i18n.gettext('Write Anyway')).click(function() {
                 this.close(dialog);
                 prm.resolve();
             }.bind(this)).appendTo(dialog.footer);
@@ -3138,7 +3140,7 @@
                 'aria-hidden': true,
             })).append(jQuery('<span/>', {
                 'class': 'sr-only'
-            }).text(Sao.i18n.gettext('Warning: '))
+            }).append(Sao.i18n.gettext('Warning: '))
             ).append(jQuery('<p/>')
                 .append(jQuery('<pre/>')
                     .text(details)))
@@ -3152,7 +3154,7 @@
             jQuery('<button/>', {
                 'class': 'btn btn-primary',
                 'type': 'button'
-            }).text(Sao.i18n.gettext('Close')).click(function() {
+            }).append(Sao.i18n.gettext('Close')).click(function() {
                 this.close(dialog);
                 prm.resolve();
             }.bind(this)).appendTo(dialog.footer);
@@ -3289,7 +3291,7 @@
                     'class': 'action action-' + action_id
                 }).append(jQuery('<a/>', {
                     'href': '#'
-                }).text(this._format_action(content)))
+                }).append(this._format_action(content)))
                 .click(function(evt) {
                     evt.preventDefault();
                     if (this.action_activated) {
@@ -3304,7 +3306,7 @@
             if (this.format) {
                 return this.format(content);
             }
-            return jQuery('<span/>').text(content);
+            return content;
         },
         _format_action: function(content) {
             if (this.format_action) {
@@ -3528,7 +3530,7 @@
         var button = jQuery('<button/>', {
             'class': 'btn btn-default',
             'type': 'button'
-        }).text(Sao.i18n.gettext('Close')).click(close)
+        }).append(Sao.i18n.gettext('Close')).click(close)
             .appendTo(dialog.footer);
         dialog.modal.on('shown.bs.modal', function() {
             // Force the click trigger
