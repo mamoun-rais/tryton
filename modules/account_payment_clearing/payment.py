@@ -126,8 +126,7 @@ class Payment(metaclass=PoolMeta):
                     if l.account == payment.line.account] + [payment.line]
                 if not sum(l.debit - l.credit for l in lines):
                     to_reconcile.append(lines)
-        for lines in to_reconcile:
-            Line.reconcile(lines)
+        Line.reconcile(*to_reconcile)
 
     @property
     def clearing_account(self):
@@ -172,7 +171,7 @@ class Payment(metaclass=PoolMeta):
             local_amount = self.amount
 
         move = Move(journal=self.journal.clearing_journal, origin=self,
-            date=date, period=period, company=self.company)
+            date=date, period=period)
         line = Line()
         if self.kind == 'payable':
             line.debit, line.credit = local_amount, 0
