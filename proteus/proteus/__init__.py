@@ -278,7 +278,10 @@ class One2ManyDescriptor(FieldDescriptor):
                 ctx.update(decoder.decode(self.definition.get('context')))
             config = Relation._config
             with config.reset_context(), config.set_context(ctx):
-                value = ModelList(self.definition, (Relation(id)
+                # JCA : Instantiate function O2M, which are read as dicts
+                # rather than ids
+                value = ModelList(self.definition, (
+                        Relation(**id) if isinstance(id, dict) else Relation(id)
                         for id in value or []), instance, self.name)
             instance._values[self.name] = value
         return value
@@ -567,11 +570,12 @@ class ModelList(list):
         raise NotImplementedError
     insert.__doc__ = list.insert.__doc__
 
-    def pop(self, index=-1):
+    def pop(self, index=-1, _changed=True):
         self.record_removed.add(self[index])
         self[index]._group = None
         res = super(ModelList, self).pop(index)
-        self._changed()
+        if _changed:
+            self._changed()
         return res
     pop.__doc__ = list.pop.__doc__
 
@@ -675,6 +679,8 @@ class Model(object):
             self._default_get()
 
         for field_name, value in kwargs.items():
+            if field_name.endswith('.'):
+                continue
             definition = self._fields[field_name]
             if definition['type'] in ('one2many', 'many2many'):
                 relation = Model.get(definition['relation'], self._config)
@@ -694,6 +700,8 @@ class Model(object):
                         relation = Model.get(
                             definition['relation'], self._config)
                         value = relation(value)
+                        if field_name + '.rec_name' in kwargs:
+                            value.rec_name = kwargs[field_name + '.rec_name']
                 setattr(self, field_name, value)
     __init__.__doc__ = object.__init__.__doc__
 
@@ -1074,7 +1082,13 @@ class Model(object):
                     record = Relation(_default=False, **vals)
                 records.append(record)
         else:
-            self._values[field] = value
+            # JCA : Properly clear M2M fields following on_change
+            if self._fields[field]['type'] == 'many2many' and not value:
+                records = getattr(self, field)
+                while len(records):
+                    records.pop(_changed=False)
+            else:
+                self._values[field] = value
         self._changed.add(field)
 
     def _set_on_change(self, values):
