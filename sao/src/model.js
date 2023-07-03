@@ -142,7 +142,6 @@
             if ((position === undefined) || (position == -1)) {
                 position = this.length;
             }
-            position = Math.min(position, this.length);
             if (changed === undefined) {
                 changed = true;
             }
@@ -196,17 +195,13 @@
                         this.record_deleted.splice(
                                 this.record_deleted.indexOf(record), 1);
                     }
-                    if (!~this.record_removed.indexOf(record)) {
-                        this.record_removed.push(record);
-                    }
+                    this.record_removed.push(record);
                 } else {
                     if (~this.record_removed.indexOf(record)) {
                         this.record_removed.splice(
                                 this.record_removed.indexOf(record), 1);
                     }
-                    if (!~this.record_deleted.indexOf(record)) {
-                        this.record_deleted.push(record);
-                    }
+                    this.record_deleted.push(record);
                 }
             }
             if (record.group.parent) {
@@ -269,7 +264,6 @@
             context._timestamp = {};
             records.forEach(function(record) {
                 jQuery.extend(context._timestamp, record.get_timestamp());
-                record.destroy();
             });
             var record_ids = records.map(function(record) {
                 return record.id;
@@ -559,10 +553,21 @@
             this.state_attrs = {};
             this.autocompletion = {};
             this.exception = false;
-            this.destroyed = false;
         },
         has_changed: function() {
-            return !jQuery.isEmptyObject(this._changed);
+            var result = !jQuery.isEmptyObject(this._changed);
+            // JCA : #15014 Add a way to make sure some fields are always
+            // ignored when detecting whether the record needs saving or not
+            if (result === false) {
+                return result;
+            }
+            return Object.keys(this._changed).some(
+          this.check_field_never_modified.bind(this));
+        },
+        check_field_never_modified: function(field) {
+            var fields = this.group.model.fields;
+            return !Object.keys(fields).includes(field) ||
+                !fields[field].description.never_modified;
         },
         save: function(force_reload) {
             if (force_reload === undefined) {
@@ -578,13 +583,7 @@
                         this.id = this.model.execute(
                             'create', [[values]], context,  false)[0];
                     } catch (e) {
-                        if (e.promise) {
-                            return e.then(function() {
-                                return this.save(force_reload);
-                            }.bind(this));
-                        } else {
-                            return jQuery.Deferred().reject();
-                        }
+                        return jQuery.Deferred().reject();
                     }
                 } else {
                     if (!jQuery.isEmptyObject(values)) {
@@ -632,7 +631,7 @@
         load: function(name) {
             var fname;
             var prm;
-            if (this.destroyed || this.is_loaded(name)) {
+            if (this.is_loaded(name)) {
                 return jQuery.when();
             }
             if (this.group.prm.state() == 'pending') {
@@ -682,6 +681,7 @@
                     fnames.push(fname);
                 }
             }
+
             var fnames_to_fetch = fnames.slice();
             var rec_named_fields = ['many2one', 'one2one', 'reference'];
             for (var i in fnames) {
@@ -701,9 +701,7 @@
                         10);
 
                 var filter_group = function(record) {
-                    return (!record.destroyed &&
-                        (record.id >= 0) &&
-                        !(name in record._loaded));
+                    return !(name in record._loaded) && (record.id >= 0);
                 };
                 var filter_parent_group = function(record) {
                     return (filter_group(record) &&
@@ -1249,8 +1247,7 @@
             if (jQuery.isEmptyObject(this._changed)) {
                 return jQuery.Deferred().resolve(true);
             }
-            var values = this._get_on_change_args(
-                Object.keys(this._changed).concat(['id']));
+            var values = this._get_on_change_args(Object.keys(this._changed));
             return this.model.execute('pre_validate',
                     [values], this.get_context())
                 .then(function() {
@@ -1416,16 +1413,6 @@
                 this.button_clicks[name] = clicks;
                 return clicks;
             }.bind(this));
-        },
-        destroy: function() {
-            var vals = Object.values(this._values);
-            for (var i=0; i < vals.length; i++) {
-                var val = vals[i];
-                if (val && val.hasOwnProperty('destroy')) {
-                    val.destroy();
-                }
-            }
-            this.destroyed = true;
         }
     });
 
@@ -1867,9 +1854,8 @@
                 if (digits) {
                     // Round to avoid float precision error
                     // after the division by factor
-                    value = value.toFixed(digits[1]);
+                    value = this.convert(value.toFixed(digits[1]));
                 }
-                value = this.convert(value);
             }
             return value;
         },
@@ -2094,7 +2080,7 @@
                         group.remove(old_record, true, true, false, false);
                     }
                 }
-                group.load(value, modified || default_);
+                group.load(value, modified);
             } else {
                 value.forEach(function(vals) {
                     var new_record = group.new_(false);
@@ -2221,7 +2207,7 @@
             return this.set(record, value, true);
         },
         set_on_change: function(record, value) {
-            var fields, new_fields;
+            var fields;
             record._changed[this.name] = true;
             this._set_default_value(record);
             if (value instanceof Array) {
@@ -2230,7 +2216,7 @@
             if (value.add || value.update) {
                 var context = this.get_context(record);
                 fields = record._values[this.name].model.fields;
-                var new_field_names = {};
+                var field_names = {};
                 var adding_values = [];
                 if (value.add) {
                     for (var i=0; i < value.add.length; i++) {
@@ -2244,25 +2230,25 @@
                                 if (!(f in fields) &&
                                     (f != 'id') &&
                                     (!~f.indexOf('.'))) {
-                                        new_field_names[f] = true;
+                                        field_names[f] = true;
                                     }
                             });
                         });
                     }
                 });
-                if (!jQuery.isEmptyObject(new_field_names)) {
+                if (!jQuery.isEmptyObject(field_names)) {
                     var args = {
                         'method': 'model.' + this.description.relation +
                             '.fields_get',
-                        'params': [Object.keys(new_field_names), context]
+                        'params': [Object.keys(field_names), context]
                     };
                     try {
-                        new_fields = Sao.rpc(args, record.model.session, false);
+                        fields = Sao.rpc(args, record.model.session, false);
                     } catch (e) {
                         return;
                     }
                 } else {
-                    new_fields = {};
+                    fields = {};
                 }
             }
 
@@ -2285,27 +2271,7 @@
             }
 
             if (value.add || value.update) {
-                // First set already added fields to prevent triggering a
-                // second on_change call
-                if (value.update) {
-                    value.update.forEach(function(vals) {
-                        if (!vals.id) {
-                            return;
-                        }
-                        var record2 = group.get(vals.id);
-                        if (record2) {
-                            var vals_to_set = {};
-                            for (var key in vals) {
-                                if (!(key in new_field_names)) {
-                                    vals_to_set[key] = vals[key];
-                                }
-                            }
-                            record2.set_on_change(vals_to_set);
-                        }
-                    });
-                }
-
-                group.add_fields(new_fields);
+                group.add_fields(fields);
                 if (value.add) {
                     value.add.forEach(function(vals) {
                         var new_record;
@@ -2586,16 +2552,14 @@
             screen_domain = inversion.prepare_reference_domain(
                 screen_domain, this.name);
             return inversion.concat([
-                inversion.localize_domain(screen_domain, this.name, true),
+                inversion.localize_domain(screen_domain, undefined, true),
                 attr_domain]);
         },
         get_models: function(record) {
             var domains = this.get_domains(record);
             var inversion = new Sao.common.DomainInversion();
-            var screen_domain = inversion.prepare_reference_domain(
-                domains[0], this.name);
             return inversion.extract_reference_models(
-                inversion.concat([screen_domain, domains[1]]),
+                inversion.concat([domains[0], domains[1]]),
                 this.name);
         },
         _is_empty: function(record) {
@@ -2627,9 +2591,7 @@
                 var context = record.get_context();
                 prm = record.model.execute('read', [[record.id], [this.name]],
                     context).then(function(data) {
-                        data = data[0][this.name];
-                        this.set(record, data);
-                        return data;
+                        return data[0][this.name];
                     }.bind(this));
             }
             return prm;

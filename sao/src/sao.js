@@ -176,27 +176,6 @@ var Sao = {};
 
     Sao.Decimal = Number;
 
-    var _moment_to_string = moment.prototype.toString;
-    moment.prototype.toString = function() {
-        if (this.isDate) {
-            return this.format('YYYY-MM-DD');
-        } else if (this.isDateTime) {
-            if (this.milliseconds()) {
-                return this.format('YYYY-MM-DD HH:mm:ss.SSSSSS');
-            } else {
-                return this.format('YYYY-MM-DD HH:mm:ss');
-            }
-        } else if (this.isTime) {
-            if (this.milliseconds()) {
-                return this.format('HH:mm:ss.SSSSSS');
-            } else {
-                return this.format('HH:mm:ss');
-            }
-        } else {
-            return _moment_to_string.call(this);
-        }
-    };
-
     Sao.Date = function(year, month, day) {
         var date;
         if (month === undefined) {
@@ -211,6 +190,9 @@ var Sao = {};
         date.date(day);
         date.set({hour: 0, minute: 0, second: 0, millisecond: 0});
         date.isDate = true;
+        date.toString = function() {
+            return this.format('YYYY-MM-DD');
+        };
         return date;
     };
 
@@ -257,6 +239,13 @@ var Sao = {};
             datetime.milliseconds(millisecond);
         }
         datetime.isDateTime = true;
+        datetime.toString = function() {
+            if (this.milliseconds()) {
+                return this.format('YYYY-MM-DD HH:mm:ss.SSSSSS');
+            } else {
+                return this.format('YYYY-MM-DD HH:mm:ss');
+            }
+        };
         datetime.local();
         return datetime;
     };
@@ -298,9 +287,9 @@ var Sao = {};
     Sao.config = {};
     Sao.config.limit = 1000;
     Sao.config.display_size = 20;
-    Sao.config.bug_url = 'https://bugs.tryton.org/';
-    Sao.config.title = 'Tryton';
-    Sao.config.icon_colors = '#3465a4,#555753,#cc0000'.split(',');
+    Sao.config.bug_url = 'https://support.coopengo.com/';
+    Sao.config.title = 'Coog';
+    Sao.config.icon_colors = '#0094d2,#555753,#cc0000'.split(',');
     Sao.config.bus_timeout = 10 * 60 * 1000;
 
     Sao.i18n = i18n();
@@ -367,10 +356,11 @@ var Sao = {};
                         Sao.Action.execute(action_id, {}, null, {});
                     });
                     Sao.set_title();
+                    /* Coog: avoid icon filled with standard color
                     Sao.common.ICONFACTORY.get_icon_url('tryton-menu')
                         .then(function(url) {
                             jQuery('.navbar-brand > img').attr('src', url);
-                        });
+                        }); */
                     var new_lang = preferences.language != Sao.i18n.getLocale();
                     var prm = jQuery.Deferred();
                     Sao.i18n.setlang(preferences.language).always(function() {
@@ -739,7 +729,8 @@ var Sao = {};
             'view_ids': view_ids,
             'domain': domain,
             'context': action_ctx,
-            'selection_mode': Sao.common.SELECTION_NONE,
+            // [Coog Specific] dbclick on menu entries
+            'selection_mode': Sao.common.SELECTION_SINGLE,
             'limit': null,
             'row_activate': Sao.main_menu_row_activate,
         });
@@ -927,7 +918,7 @@ var Sao = {};
         format: function(content) {
             var el = jQuery('<div/>');
             Sao.common.ICONFACTORY.get_icon_img(
-                content.icon, {'class': 'global_search-icon'})
+                content.icon, {'class': 'global-search-icon'})
                 .appendTo(el);
             jQuery('<span/>', {
                 'class': 'global-search-text'

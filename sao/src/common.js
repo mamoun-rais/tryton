@@ -26,22 +26,11 @@
             return false;
         }
         for (var i = 0; i < arr1.length; i++) {
-            var a = arr1[i], b = arr2[i];
-            if ((a instanceof Array) && (b instanceof Array)) {
-                if (!Sao.common.compare(a, b)) {
+            if (arr1[i] instanceof Array && arr2[i] instanceof Array) {
+                if (!Sao.common.compare(arr1[i], arr2[i])) {
                     return false;
                 }
-            } else if (moment.isMoment(a) && moment.isMoment(b)) {
-                if ((a.isDate != b.isDate) &&
-                    (a.isDateTime != b.isDateTime) &&
-                    (a.valueOf() != b.valueOf())) {
-                    return false;
-                }
-            } else if ((a instanceof Number) || (b instanceof Number)) {
-                if (Number(a) !== Number(b)) {
-                    return false;
-                }
-            } else if (a != b) {
+            } else if (arr1[i] != arr2[i]) {
                 return false;
             }
         }
@@ -129,7 +118,7 @@
         }
         var prm = jQuery.Deferred();
         if (jQuery.isEmptyObject(values)) {
-            prm.reject();
+            prm.fail();
             return prm;
         }
         var keys = Object.keys(values).sort();
@@ -1790,15 +1779,12 @@
             }.bind(this));
             return result;
         },
-        likify: function(value, escape) {
-            escape = escape || '\\';
+        likify: function(value) {
             if (!value) {
                 return '%';
             }
-            var escaped = value
-                .replace(escape + '%', '')
-                .replace(escape + '_', '');
-            if (escaped.contains('%') || escaped.contains('_')) {
+            var escaped = value.replace('%%', '__');
+            if (escaped.contains('%')) {
                 return value;
             } else {
                 return '%' + value + '%';
@@ -1980,25 +1966,20 @@
                 if (!value && value !== 0 && value !== new Sao.Decimal(0)) {
                     return '';
                 }
-                var digit = 0;
                 var factor = Number(field.factor || 1);
-                var string = String(value * factor);
-                if (string.contains('e')) {
-                    var exp = string.split('e')[1];
-                    string = string.split('e')[0];
-                    digit -= parseInt(exp);
-                }
-                if (string.contains('.')) {
-                    digit += string.replace(/0+$/, '').split('.')[1].length;
+                var digit = String(value * factor)
+                    .replace(/0+$/, '').split('.')[1];
+                if (digit) {
+                    digit = digit.length;
+                } else {
+                    digit = 0;
                 }
                 return (value * factor).toFixed(digit);
             };
             var format_selection = function() {
-                if (field.selection instanceof Array) {
-                    for (var i = 0; i < field.selection.length; i++) {
-                        if (field.selection[i][0] == value) {
-                            return field.selection[i][1];
-                        }
+                for (var i = 0; i < field.selection.length; i++) {
+                    if (field.selection[i][0] == value) {
+                        return field.selection[i][1];
                     }
                 }
                 return value || '';
@@ -2323,104 +2304,23 @@
             }
         },
         prepare_reference_domain: function(domain, reference) {
-
-            var value2reference = function(value) {
-                var model = null;
-                var ref_id = null;
-                if ((typeof(value) == 'string') && value.contains(',')) {
-                    var split = value.split(',');
-                    var result = split.splice(0, 1);
-                    result.push(split.join(','));
-                    model = result[0];
-                    ref_id = result[1];
-                    if (ref_id != '%') {
-                        ref_id = parseInt(ref_id, 10);
-                        if (isNaN(ref_id)) {
-                            model = null;
-                            ref_id = value;
-                        }
-                    }
-                } else if ((value instanceof Array) &&
-                        (value.length == 2) &&
-                        (typeof(value[0]) == 'string') &&
-                        ((typeof(value[1]) == 'number') ||
-                            (value[1] == '%'))) {
-                    model = value[0];
-                    ref_id = value[1];
-                } else {
-                    ref_id = value;
-                }
-                return [model, ref_id];
-            };
-
             if (~['AND', 'OR'].indexOf(domain)) {
                 return domain;
             } else if (this.is_leaf(domain)) {
-                if (domain[0] == reference) {
-                    var model, ref_id, splitted;
-                    if ((domain[1] == '=') || (domain[1] ==  '!=')) {
-                        splitted = value2reference(domain[2]);
-                        model = splitted[0];
-                        ref_id = splitted[1];
-                        if (model) {
-                            if (ref_id == '%') {
-                                if (domain[1] == '=') {
-                                    return [
-                                        reference + '.id', '!=', null, model];
-                                } else {
-                                    return [reference, 'not like', domain[2]];
-                                }
-                            }
-                            return [
-                                reference + '.id', domain[1], ref_id, model];
-                        }
-                    } else if ((domain[1] == 'in') || (domain[1] == 'not in')) {
-                        var model_values = {};
-                        var break_p = false;
-                        for (var i=0; i < domain[2].length; i++) {
-                            splitted = value2reference(domain[2][i]);
-                            model = splitted[0];
-                            ref_id = splitted[1];
-                            if (!model) {
-                                break_p = true;
-                                break;
-                            }
-                            if (!(model in model_values)) {
-                                model_values[model] = [];
-                            }
-                            model_values[model].push(ref_id);
-                        }
+                if ((domain[0].split('.').length > 1) &&
+                        (domain.length > 3)) {
+                    var parts = domain[0].split('.');
+                    var local_name = parts[0];
+                    var target_name = parts.slice(1).join('.');
 
-                        if (!break_p) {
-                            var ref_ids;
-                            var new_domain;
-                            if (domain[1] == 'in') {
-                                new_domain = ['OR'];
-                            } else {
-                                new_domain = ['AND'];
-                            }
-                            for (model in model_values) {
-                                ref_ids = model_values[model];
-                                if (~ref_ids.indexOf('%')) {
-                                    if (domain[1] == 'in') {
-                                        new_domain.push(
-                                            [reference + '.id', '!=', null,
-                                                model]);
-                                    } else {
-                                        new_domain.push(
-                                            [reference, 'not like',
-                                                model + ',%']);
-                                    }
-                                } else {
-                                    new_domain.push(
-                                        [reference + '.id', domain[1],
-                                            ref_ids.map(Number), model]);
-                                }
-                            }
-                            return new_domain;
-                        }
+                    if (local_name == reference) {
+                        var where = [];
+                        where.push(target_name);
+                        where = where.concat(
+                            domain.slice(1, 3), domain.slice(4));
+                        return where;
                     }
-                    return [];
+                    return domain;
                 }
                 return domain;
             } else {
@@ -3071,15 +2971,16 @@
         build_dialog: function(message, title, prm) {
             var dialog = Sao.common.UserWarningDialog._super.build_dialog.call(
                 this, message, title, prm);
-            var always = jQuery('<input/>', {
-                'type': 'checkbox'
-            });
-            dialog.body.append(jQuery('<div/>', {
-                'class': 'checkbox',
-            }).append(jQuery('<label/>')
-                .append(always)
-                .text(Sao.i18n.gettext('Always ignore this warning.')))
-            );
+            // Coog specific : do not display this warning cf bug #9035
+            // var always = jQuery('<input/>', {
+            //     'type': 'checkbox'
+            // });
+            // dialog.body.append(jQuery('<div/>', {
+            //     'class': 'checkbox',
+            // }).append(jQuery('<label/>')
+            //     .append(always)
+            //     .append(Sao.i18n.gettext('Always ignore this warning.')))
+            // );
             dialog.body.append(jQuery('<p/>')
                     .text(Sao.i18n.gettext('Do you want to proceed?')));
             dialog.footer.empty();
@@ -3095,9 +2996,10 @@
                 'type': 'button'
             }).text(Sao.i18n.gettext('Yes')).click(function() {
                 this.close(dialog);
-                if (always.prop('checked')) {
-                    prm.resolve('always');
-                }
+                // Coog specific : always is not displayed cf bug #9035
+                // if (always.prop('checked')) {
+                //     prm.resolve('always');
+                // }
                 prm.resolve('ok');
             }.bind(this)).appendTo(dialog.footer);
             return dialog;
@@ -3762,6 +3664,16 @@
                 var v = c == 'x' ? r : (r & 0x3 | 0x8);
                 return v.toString(16);
             });
+    };
+
+    Sao.common.clone = function(obj) {
+        var copy = obj.constructor();
+        for (var attr in obj) {
+            if (obj.hasOwnProperty(attr)) {
+                copy[attr] = obj[attr];
+            }
+        }
+        return copy;
     };
 
 }());

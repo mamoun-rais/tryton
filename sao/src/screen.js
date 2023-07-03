@@ -346,7 +346,10 @@
                 return [];
             }
             var i = this.tab.find('li').index(this.tab.find('li.active'));
-            return this.tab_domain[i][1];
+            var ctx = this.tab_domain[i][1][0];
+            var domain = this.tab_domain[i][1][1];
+            var decoder = new Sao.PYSON.Decoder(ctx);
+            return decoder.decode(domain);
         },
         set_tab_counter: function(count, idx) {
             if (jQuery.isEmptyObject(this.tab_counter) || !this.tab) {
@@ -551,12 +554,17 @@
             if (this.last_search_text.trim() !== this.get_text().trim()) {
                 for (var j = 0; j < this.search_form.fields.length; j++) {
                     var fentry = this.search_form.fields[j][1];
-                    if (fentry instanceof Sao.ScreenContainer.Selection) {
-                        fentry.set_value([]);
-                    } else if (fentry instanceof Sao.ScreenContainer.Between) {
-                        fentry.set_value(null, null);
-                    } else {
-                        fentry.val('');
+                    switch(fentry.type) {
+                        case 'selection':
+                            fentry.set_value([]);
+                            break;
+                        case 'date':
+                        case 'datetime':
+                        case 'time':
+                            fentry.set_value(null, null);
+                            break;
+                        default:
+                            fentry.val('');
                     }
                 }
                 this.search_form.fields[0][2].focus();
@@ -604,8 +612,8 @@
         _get_value: function(entry) {
         },
         set_value: function(from, to) {
-            this._set_value(this.from, from);
-            this._set_value(this.to, to);
+            this._set_value(self.from, from);
+            this._set_value(self.to, to);
         },
         _set_value: function(entry, value) {
         },
@@ -807,6 +815,9 @@
             this._domain_parser = {};
             this.pre_validate = false;
             this.tab = null;
+            // [Coog specific] used for group_sync
+            this.parent = null;
+            // end
             this.message_callback = null;
             this.switch_callback = null;
             this.group_changed_callback = null;
@@ -865,10 +876,16 @@
             for (field in fields) {
                 this.group.model.fields[field].views.add(view_id);
             }
+            // [Coog specific] multi_mixed_view
             var view_widget = Sao.View.parse(
-                this, view_id, view.type, xml_view, view.field_childs);
+                this, view_id, view.type, xml_view, view.field_childs,
+                view.children_definitions);
             this.views.push(view_widget);
 
+            // [Coog specific] JMO: report https://github.com/coopengo/tryton/pull/13
+            var fkeys = {};
+            for  (var k in fields) {fkeys[k] = '';}
+            view_widget._field_keys = fkeys;
             return view_widget;
         },
         get number_of_views() {
@@ -961,6 +978,7 @@
                             .then(set_current_view);
                     } else {
                         var i = this.views.indexOf(this.current_view);
+
                         this.current_view = this.views[
                             (i + 1) % this.views.length];
                     }
@@ -1110,7 +1128,12 @@
                 this.screen_container.get_text(), false, false);
             this.screen_container.tab_domain.forEach(function(tab_domain, i) {
                 if (tab_domain[2]) {
-                    var domain = ['AND', tab_domain[1], screen_domain];
+                    var ctx = tab_domain[1][0];
+                    var t_domain = tab_domain[1][1];
+                    var decoder = new Sao.PYSON.Decoder(ctx);
+
+                    var domain = ['AND', decoder.decode(t_domain),
+                        screen_domain];
                     this.screen_container.set_tab_counter(null, i);
                     this.group.model.execute(
                         'search_count', [domain], this.context)
@@ -1159,11 +1182,9 @@
             this.views.map(function(view) {
                 view.reset();
             });
+            this.order = null;
             this.group = group;
             this.model = group.model;
-            if (this.group.parent) {
-                this.order = null;
-            }
             if (group && group.length) {
                 this.current_record = group[0];
             } else {
@@ -1191,6 +1212,8 @@
             return this.__current_record;
         },
         set current_record(record) {
+            // [Coog specific] multi_mixed_view
+            var changed = this.current_record !== record;
             this.__current_record = record;
             if (this.message_callback){
                 var pos = null;
@@ -1220,11 +1243,16 @@
                 }
                 this.tab.record_message();
             }
+            // [Coog specific] multi_mixed_view
+            if (this.parent && changed){
+                this.parent.group_sync(this, this.current_record);
+            }
         },
         load: function(ids, set_cursor, modified) {
             if (set_cursor === undefined) {
                 set_cursor = true;
             }
+            this.tree_states = {};
             this.tree_states_done = [];
             this.group.load(ids, modified);
             if (ids.length && this.current_view.view_type != 'calendar') {
@@ -1253,13 +1281,16 @@
                         ~['tree', 'graph', 'calendar'].indexOf(
                             this.current_view.view_type));
                 deferreds.push(search_prm);
-                for (var i = 0; i < this.views.length; i++) {
-                    if (this.views[i] &&
-                        ((this.views[i] == this.current_view) ||
-                            this.views[i].el.parent().length)) {
-                        deferreds.push(this.views[i].display());
-                    }
-                }
+                // [Coog specific]
+                // JMO: report https://github.com/coopengo/tryton/pull/13
+                // for (var i = 0; i < this.views.length; i++) {
+                //      if (this.views[i] &&
+                //         ((this.views[i] == this.current_view) ||
+                //             this.views[i].el.parent().length)) {
+                //         deferreds.push(this.views[i].display());
+                //     }
+                // }
+                deferreds.push(this.current_view.display());
             }
             return jQuery.when.apply(jQuery, deferreds).then(function() {
                 return this.set_tree_state().then(function() {
@@ -1403,16 +1434,10 @@
             }.bind(this));
         },
         get new_position() {
-            var order;
-            if (this.order !== null) {
-                order = this.order;
-            } else {
-                order = this.default_order;
-            }
-            if (order) {
-                for (var j = 0; j < order.length; j++) {
-                    var oexpr = order[j][0],
-                        otype = order[j][1];
+            if (this.order) {
+                for (var j = 0; j < this.order.length; j++) {
+                    var oexpr = this.order[j][0],
+                        otype = this.order[j][1];
                     if ((oexpr == 'id') && otype) {
                         if (otype.startsWith('DESC')) {
                             return 0;
@@ -1819,11 +1844,23 @@
             var ids;
             var process_action = function(action) {
                 return this.reload(ids, true).then(function() {
+                    // [Coog specific]
+                    // JMO: report https://github.com/coopengo/tryton/pull/13
+                    var action_id;
+                    if (action && typeof action != 'string' &&
+                      action.length && action.length === 2) {
+                      action_id = action[0];
+                      action = action[1];
+                    } else if (typeof action == 'number') {
+                      action_id = action;
+                      action = undefined;
+                    }
+                    // end
                     if (typeof action == 'string') {
                         this.client_action(action);
                     }
-                    else if (action) {
-                        Sao.Action.execute(action, {
+                    if (action_id) {
+                        Sao.Action.execute(action_id, {
                             model: this.model_name,
                             id: this.current_record.id,
                             ids: ids
@@ -1875,10 +1912,11 @@
                         var values = record._get_on_change_args(args);
                         return record.model.execute(attributes.name, [values],
                             this.context).then(function(changes) {
-                            record.set_on_change(changes);
-                            record.group.root_group.screens.forEach(
-                                function(screen) {
-                                    screen.display();
+                            record.set_on_change(changes).then(function() {
+                                record.group.root_group.screens.forEach(
+                                    function(screen) {
+                                        screen.display();
+                                    });
                             });
                         });
                     } else {
@@ -1905,6 +1943,13 @@
         },
         client_action: function(action) {
             var access = Sao.common.MODELACCESS.get(this.model_name);
+            // [Coog specific] Allow multiple actions
+            var actions = action.split(',');
+            for (var i in actions){
+                this.do_single_action(actions[i], access);
+            }
+        },
+        do_single_action: function(action, access) {
             if (action == 'new') {
                 if (access.create) {
                     this.new_();
@@ -1926,7 +1971,7 @@
             } else if (action == 'previous') {
                 this.display_previous();
             } else if (action == 'close') {
-                Sao.Tab.close_current();
+                Sao.Tab.tabs.close_current();
             } else if (action.startsWith('switch')) {
                 this.switch_view.apply(this, action.split(' ', 3).slice(1));
             } else if (action == 'reload') {
@@ -1962,10 +2007,12 @@
             if (name) {
                 query_string.push(['name', dumps(name)]);
             }
-            if (!jQuery.isEmptyObject(this.attributes.tab_domain)) {
-                query_string.push([
-                    'tab_domain', dumps(this.attributes.tab_domain)]);
-            }
+            // XXX: Evaluate tab domain later
+            // Dynamic domain evaluation in screens and tabs
+            // if (!jQuery.isEmptyObject(this.attributes.tab_domain)) {
+            //     query_string.push([
+            //         'tab_domain', dumps(this.attributes.tab_domain)]);
+            // }
             var path = ['model', this.model_name];
             var view_ids = this.views.map(
                 function(v) {return v.view_id;}).concat(this.view_ids);

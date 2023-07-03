@@ -78,10 +78,14 @@
         return path;
     };
 
-    Sao.View.parse = function(screen, view_id, type, xml, children_field) {
+    // [Coog specific] multi_mixed_view
+    Sao.View.parse = function(screen, view_id, type, xml, children_field,
+        children_definitions) {
         switch (type) {
             case 'tree':
-                return new Sao.View.Tree(view_id, screen, xml, children_field);
+                // [Coog specific] multi_mixed_view
+                return new Sao.View.Tree(view_id, screen, xml, children_field,
+                    children_definitions);
             case 'form':
                 return new Sao.View.Form(view_id, screen, xml);
             case 'graph':
@@ -144,8 +148,7 @@
                     'relation_field', 'views', 'invisible', 'add_remove',
                     'sort', 'context', 'size', 'filename', 'autocomplete',
                     'translate', 'create', 'delete', 'selection_change_with',
-                    'schema_model', 'required', 'order',
-                ].forEach(function(name) {
+                    'schema_model', 'required'].forEach(function(name) {
                         if ((name in field) && (!(name in node_attrs))) {
                             node_attrs[name] = field[name];
                         }

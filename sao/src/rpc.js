@@ -33,8 +33,8 @@
         var ajax_success = function(data, status_, query) {
             if (data === null) {
                 Sao.common.warning.run('',
-                        Sao.i18n.gettext('Unable to reach the server.'))
-                    .always(dfd.reject);
+                        Sao.i18n.gettext('Unable to reach the server.'));
+                dfd.reject();
             } else if (data.error) {
                 var name, msg, description;
                 if (data.error[0] == 'UserWarning') {
@@ -55,14 +55,11 @@
                                     'always': result == 'always'
                                 }], {}]
                             }, session).done(function() {
-                                if (async) {
-                                    Sao.rpc(args, session).then(
-                                        dfd.resolve, dfd.reject);
-                                } else {
-                                    dfd.resolve();
-                                }
+                                Sao.rpc(args, session).then(
+                                    dfd.resolve, dfd.reject);
                             });
                         }, dfd.reject);
+                    return;
                 } else if (data.error[0] == 'UserError') {
                     msg = data.error[1][0];
                     description = data.error[1][1];
@@ -77,9 +74,9 @@
                     }
                     Sao.common.warning.run(description, msg)
                         .always(dfd.reject);
+                    return;
                 } else if (data.error[0] == 'ConcurrencyException') {
-                    if (async &&
-                        args.method.startsWith('model.') &&
+                    if (args.method.startsWith('model.') &&
                         (args.method.endsWith('.write') ||
                             args.method.endsWith('.delete')) &&
                         (args.params[0].length == 1)) {
@@ -91,14 +88,25 @@
                                 Sao.rpc(args, session).then(
                                     dfd.resolve, dfd.reject);
                             }, dfd.reject);
+                        return;
                     } else {
                         Sao.common.message.run('Concurrency Exception',
                                 'tryton-warning').always(dfd.reject);
+                        return;
                     }
+                // PKUNK Fix#10127
+                } else if (data.error[0] == "'ir.session'") {
+                    return session.do_logout()
+                        .then(Sao.Session.get_credentials()
+                            .then(function(session) {
+                                Sao.Session.current_session = session;
+                                dfd.resolve();
+                            })
+                        );
                 } else {
-                    Sao.common.error.run(data.error[0], data.error[1])
-                        .always(dfd.reject);
+                    Sao.common.error.run(data.error[0], data.error[1]);
                 }
+                dfd.reject();
             } else {
                 result = data.result;
                 if (session.cache) {
@@ -120,20 +128,16 @@
             if (query.status == 401) {
                 //Try to relog
                 Sao.Session.renew(session).then(function() {
-                    if (async) {
-                        Sao.rpc(args, session).then(dfd.resolve, dfd.reject);
-                    } else {
-                        dfd.resolve();
-                    }
+                    Sao.rpc(args, session).then(dfd.resolve, dfd.reject);
                 }, dfd.reject);
+                return;
             } else if (query.status == 429) {
                 Sao.common.message.run(
                     Sao.i18n.gettext('Too many requests. Try again later.'),
-                    'tryton-error')
-                    .always(dfd.reject);
+                    'tryton-error').always(dfd.reject);
             } else {
-                Sao.common.error.run(status_, error)
-                    .always(dfd.reject);
+                Sao.common.error.run(status_, error);
+                dfd.reject();
             }
         };
 
@@ -159,8 +163,6 @@
         });
         if (async) {
             return dfd.promise();
-        } else if (result === undefined) {
-            throw dfd;
         } else {
             return result;
         }
@@ -181,7 +183,7 @@
                        value = Sao.DateTime(value.year,
                                value.month - 1, value.day, value.hour,
                                value.minute, value.second,
-                               Math.ceil(value.microsecond / 1000), true);
+                               value.microsecond / 1000, true);
                        break;
                    case 'date':
                        value = Sao.Date(value.year,
@@ -189,7 +191,7 @@
                        break;
                    case 'time':
                        value = Sao.Time(value.hour, value.minute,
-                           value.second, Math.ceil(value.microsecond / 1000));
+                               value.second, value.microsecond / 1000);
                        break;
                     case 'timedelta':
                        value = Sao.TimeDelta(null, value.seconds);

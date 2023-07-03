@@ -725,17 +725,7 @@
                             case 'ok':
                                 return this.save();
                             case 'ko':
-                                var record_id = this.screen.current_record.id;
-                                return this.reload(false).then(function() {
-                                    if (this.screen.current_record) {
-                                        if (record_id !=
-                                            this.screen.current_record.id) {
-                                            return jQuery.Deferred().reject();
-                                        }
-                                    } else if (record_id < 0) {
-                                        return jQuery.Deferred().resolve();
-                                    }
-                                }.bind(this));
+                                return this.reload(false);
                             default:
                                 return jQuery.Deferred().reject();
                         }
@@ -1422,8 +1412,7 @@
             var prm = jQuery.when();
             if ((wizard.state !== wizard.end_state) &&
                 (wizard.end_state in wizard.states)) {
-                prm = wizard.response(
-                    wizard.states[wizard.end_state].attributes);
+                prm = wizard.response(wizard.end_state);
             }
             var dfd = jQuery.Deferred();
             prm.always(function() {

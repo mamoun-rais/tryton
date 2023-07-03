@@ -81,15 +81,7 @@
                     button_text = Sao.i18n.gettext('Delete');
                 } else {
                     button_text = Sao.i18n.gettext('Cancel');
-                    var record = this.screen.current_record;
-                    this._initial_value = record.get_on_change_value();
-                    if (record.group.parent &&
-                        record.model.fields[record.group.parent_name]) {
-                        var parent_field = record.model.fields[
-                            record.group.parent_name];
-                        this._initial_value[record.group.parent_name] = (
-                            parent_field.get_eval(record));
-                    }
+                    this._initial_value = this.screen.current_record.get_eval();
                 }
 
                 dialog.footer.append(jQuery('<button/>', {
@@ -213,8 +205,10 @@
                     'class': 'btn btn-default btn-sm',
                     'type': 'button',
                     'aria-label': Sao.i18n.gettext('New')
-                }).append(Sao.common.ICONFACTORY.get_icon_img('tryton-create')
-                ).appendTo(buttons);
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-plus'
+                })).appendTo(buttons);
                 this.but_new.click(disable_during(this.new_.bind(this)));
                 this.but_new.prop('disabled', !access.create || readonly);
 
@@ -235,6 +229,16 @@
                 ).appendTo(buttons);
                 this.but_undel.click(disable_during(this.undelete.bind(this)));
                 this.but_undel.prop('disabled', !access['delete'] || readonly);
+
+                this.but_switch = jQuery('<button/>', {
+                    'class': 'btn btn-default btn-sm',
+                    'type': 'button',
+                    'aria-label': Sao.i18n.gettext('Switch')
+                }).append(jQuery('<span/>', {
+                    // Coog Override Icon
+                    'class': 'glyphicon glyphicon-resize-full'
+                })).appendTo(buttons);
+                this.but_switch.click(this.switch_.bind(this));
 
                 this.screen.message_callback = this.record_label.bind(this);
             }
@@ -412,24 +416,17 @@
                     !readonly &&
                     this.screen.current_record) {
                 result = false;
-                var record = this.screen.current_record;
-                var added = record._changed.id;
-                if ((record.id < 0) || this.save_current) {
+                if ((this.screen.current_record.id < 0) || this.save_current) {
                     cancel_prm = this.screen.cancel_current(
                         this._initial_value);
-                } else if (record.has_changed()) {
-                    record.cancel();
-                    cancel_prm = record.reload().then(function() {
-                        this.screen.display();
-                    }.bind(this));
-                }
-                if (added) {
-                    record._changed.id = added;
+                } else if (this.screen.current_record.has_changed()) {
+                    this.screen.current_record.cancel();
+                    cancel_prm = this.screen.current_record.reload();
                 }
             } else {
                 result = response_id != 'RESPONSE_CANCEL';
             }
-            (cancel_prm || jQuery.when()).then(function() {
+            (cancel_prm || jQuery.when()).done(function() {
                 this.callback(result);
                 this.destroy();
             }.bind(this));
@@ -1643,7 +1640,11 @@
 
                 items.forEach(function(item) {
                     var path = prefix_field + item.name;
-                    var long_string = prefix_name + item.string;
+                    var long_string = item.string;
+
+                    if (prefix_field) {
+                        long_string = prefix_name + item.string;
+                    }
 
                     var node = {
                         path: path,
@@ -1665,7 +1666,7 @@
             if (jQuery.isEmptyObject(node.children)) {
                 this.model_populate(
                     this._get_fields(node.relation), node.children,
-                    node.path + '/', node.long_string + '/');
+                    node.path + '/', node.string + '/');
             }
         },
         sig_sel_add: function(el_field) {
