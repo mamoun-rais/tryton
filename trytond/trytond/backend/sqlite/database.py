@@ -42,13 +42,13 @@ class SQLiteExtract(Function):
         if date is None:
             return None
         if len(date) == 10:
-            year, month, day = map(int, date.split('-'))
+            year, month, day = list(map(int, date.split('-')))
             date = datetime.date(year, month, day)
         else:
             datepart, timepart = date.split(" ")
-            year, month, day = map(int, datepart.split("-"))
+            year, month, day = list(map(int, datepart.split("-")))
             timepart_full = timepart.split(".")
-            hours, minutes, seconds = map(int, timepart_full[0].split(":"))
+            hours, minutes, seconds = list(map(int, timepart_full[0].split(":")))
             if len(timepart_full) == 2:
                 microseconds = int(timepart_full[1])
             else:
@@ -334,6 +334,9 @@ class Database(DatabaseInterface):
         if name == ':memory:':
             Database._local.memory_database = self
 
+    def _kill_session_query(self, database_name):
+        return 'SELECT 1'
+
     def connect(self):
         if self.name == ':memory:':
             path = ':memory:'
@@ -430,6 +433,10 @@ class Database(DatabaseInterface):
             return
         os.remove(os.path.join(config.get('database', 'path'),
             database_name + '.sqlite'))
+
+    def _kill_session_query(self, database_name):
+        # JMO : not necessary
+        return 'select 1'
 
     def list(self, hostname=None):
         res = []

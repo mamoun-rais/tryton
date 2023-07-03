@@ -39,6 +39,11 @@ from trytond.backend.database import DatabaseInterface, SQLType
 from trytond.config import config, parse_uri
 from trytond.tools.gevent import is_gevent_monkey_patched
 
+# MAB: Performance analyser tools (See [ec1462afd])
+from trytond.perf_analyzer import analyze_before, analyze_after
+from trytond.perf_analyzer import logger as perf_logger
+
+
 __all__ = ['Database', 'DatabaseIntegrityError', 'DatabaseOperationalError']
 
 logger = logging.getLogger(__name__)
@@ -67,6 +72,38 @@ class LoggingCursor(cursor):
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(self.mogrify(sql, args))
         cursor.execute(self, sql, args)
+
+
+class PerfCursor(cursor):
+    def execute(self, query, vars=None):
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(self.mogrify(query, vars))
+        try:
+            context = analyze_before(self)
+        except Exception:
+            perf_logger.exception('analyse_before failed')
+            context = None
+        ret = super(PerfCursor, self).execute(query, vars)
+        if context is not None:
+            try:
+                analyze_after(*context)
+            except Exception:
+                perf_logger.exception('analyse_after failed')
+        return ret
+
+    def callproc(self, procname, vars=None):
+        try:
+            context = analyze_before(self)
+        except Exception:
+            perf_logger.exception('analyse_before failed')
+            context = None
+        ret = super(PerfCursor, self).callproc(procname, vars)
+        if context is not None:
+            try:
+                analyze_after(*context)
+            except Exception:
+                perf_logger.exception('analyse_after failed')
+        return ret
 
 
 class ForSkipLocked(For):
@@ -174,6 +211,7 @@ class Database(DatabaseInterface):
                     inst._connpool = ThreadedConnectionPool(
                         minconn, _maxconn, **cls._connection_params(name),
                         cursor_factory=LoggingCursor)
+                    logger.info('connected to "%s"', name)
                 except Exception:
                     logger.error(
                         'connection to "%s" failed', name, exc_info=True)
@@ -203,6 +241,11 @@ class Database(DatabaseInterface):
             params['port'] = uri.port
         return params
 
+    def _kill_session_query(self, database_name):
+        return 'SELECT pg_terminate_backend(pg_stat_activity.pid) ' \
+            'FROM pg_stat_activity WHERE pg_stat_activity.datname = \'%s\'' \
+            ' AND pid <> pg_backend_pid();' % database_name
+
     def connect(self):
         return self
 
@@ -221,19 +264,14 @@ class Database(DatabaseInterface):
                 logger.error(
                     'connection to "%s" failed', self.name, exc_info=True)
                 raise
-        # We do not use set_session because psycopg2 < 2.7 and psycopg2cffi
-        # change the default_transaction_* attributes which breaks external
-        # pooling at the transaction level.
         if autocommit:
             conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         else:
             conn.set_isolation_level(ISOLATION_LEVEL_REPEATABLE_READ)
-        # psycopg2cffi does not have the readonly property
-        if hasattr(conn, 'readonly'):
-            conn.readonly = readonly
-        elif not autocommit and readonly:
+        if readonly:
             cursor = conn.cursor()
             cursor.execute('SET TRANSACTION READ ONLY')
+        conn.cursor_factory = PerfCursor
         return conn
 
     def put_connection(self, connection, close=False):
@@ -280,12 +318,10 @@ class Database(DatabaseInterface):
             res = []
             for db_name, in cursor:
                 try:
-                    conn = connect(**self._connection_params(db_name))
-                    try:
-                        with conn:
-                            if self._test(conn, hostname=hostname):
-                                res.append(db_name)
-                    finally:
+                    with connect(**self._connection_params(db_name)
+                            ) as conn:
+                        if self._test(conn, hostname=hostname):
+                            res.append(db_name)
                         conn.close()
                 except Exception:
                     logger.debug(

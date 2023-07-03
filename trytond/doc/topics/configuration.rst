@@ -241,10 +241,6 @@ certificate
 
 The path to the certificate.
 
-.. tip::
-   Set only one of ``privatekey`` or ``certificate`` to ``true`` if the SSL is
-   delegated.
-
 email
 -----
 

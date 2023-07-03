@@ -29,6 +29,7 @@ from sql.conditionals import Coalesce, Case
 from sql.aggregate import Count
 from sql.operators import Concat
 
+import trytond.security as security
 from passlib.context import CryptContext
 
 try:
@@ -278,9 +279,9 @@ class User(DeactivableMixin, ModelSQL, ModelView):
         for user in users:
             # Use getattr to allow to use non User instances
             for test, message in [
-                    (getattr(user, 'name', ''), 'res.msg_password_name'),
-                    (getattr(user, 'login', ''), 'res.msg_password_login'),
-                    (getattr(user, 'email', ''), 'res.msg_password_email'),
+                    (getattr(user, 'name', ''), 'msg_password_name'),
+                    (getattr(user, 'login', ''), 'msg_password_login'),
+                    (getattr(user, 'email', ''), 'msg_password_email'),
                     ]:
                 if test and password.lower() == test.lower():
                     raise PasswordError(gettext(message))
@@ -315,10 +316,15 @@ class User(DeactivableMixin, ModelSQL, ModelView):
 
     @staticmethod
     def get_sessions(users, name):
+        # AKE: manage session on redis
+        if security.config_session_redis():
+            dbname = Pool().database_name
+            return {u.id: security.redis.count_sessions(dbname, u.id)
+                for u in users}
         Session = Pool().get('ir.session')
         now = datetime.datetime.now()
         timeout = datetime.timedelta(
-            seconds=config.getint('session', 'max_age'))
+            seconds=config.getint('session', 'timeout'))
         result = dict((u.id, 0) for u in users)
         with Transaction().set_user(0):
             for sub_ids in grouped_slice(users):
@@ -445,6 +451,10 @@ class User(DeactivableMixin, ModelSQL, ModelView):
         ConfigItem = pool.get('ir.module.config_wizard.item')
 
         res = {}
+        # AKE: add token information to get_preferences RPC
+        token = Transaction().context.get('token', None)
+        if token is not None:
+            res['token'] = token
         if context_only:
             fields = cls._context_fields
         else:

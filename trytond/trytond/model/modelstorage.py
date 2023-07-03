@@ -4,6 +4,7 @@
 import datetime
 import time
 import csv
+import logging
 
 from decimal import Decimal
 from itertools import islice, chain
@@ -98,7 +99,7 @@ class ModelStorage(Model):
     create_uid = fields.Many2One(
         'res.user', lazy_gettext('ir.msg_created_by'), readonly=True)
     create_date = fields.Timestamp(
-        lazy_gettext('ir.msg_created_at'), readonly=True)
+        lazy_gettext('ir.msg_created_by'), readonly=True)
     write_uid = fields.Many2One(
         'res.user', lazy_gettext('ir.msg_edited_by'), readonly=True)
     write_date = fields.Timestamp(
@@ -390,18 +391,20 @@ class ModelStorage(Model):
                 or isinstance(f, fields.MultiValue))
             and n not in mptt]
         ids = list(map(int, records))
-        values = {d['id']: d for d in cls.read(ids, fields_names=fields_names)}
+        datas = cls.read(ids, fields_names=fields_names)
+        datas = dict((d['id'], d) for d in datas)
         field_defs = cls.fields_get(fields_names=fields_names)
         to_create = []
-        for id_ in ids:
-            data = convert_data(field_defs, values[id_])
+        for id in ids:
+            data = convert_data(field_defs, datas[id])
             to_create.append(data)
         new_records = cls.create(to_create)
+        id2new_record = dict(zip(ids, new_records))
 
         fields_translate = {}
         for field_name, field in field_defs.items():
-            if (field_name in cls._fields
-                    and getattr(cls._fields[field_name], 'translate', False)):
+            if field_name in cls._fields and \
+                    getattr(cls._fields[field_name], 'translate', False):
                 fields_translate[field_name] = field
 
         if fields_translate:
@@ -409,19 +412,16 @@ class ModelStorage(Model):
                 ('translatable', '=', True),
                 ])
             if langs:
-                id2new_records = defaultdict(list)
-                for id_, new_record in zip(ids, new_records):
-                    id2new_records[id_].append(new_record)
                 fields_names = list(fields_translate.keys()) + ['id']
                 for lang in langs:
                     # Prevent fuzzing translations when copying as the terms
                     # should be the same.
                     with Transaction().set_context(language=lang.code,
                             fuzzy_translation=False):
-                        values = cls.read(ids, fields_names=fields_names)
+                        datas = cls.read(ids, fields_names=fields_names)
                         to_write = []
-                        for data in values:
-                            to_write.append(id2new_records[data['id']])
+                        for data in datas:
+                            to_write.append([id2new_record[data['id']]])
                             to_write.append(
                                 convert_data(fields_translate, data))
                         cls.write(*to_write)
@@ -1187,6 +1187,10 @@ class ModelStorage(Model):
                                 and not value)
                             or (field._type == 'reference'
                                 and not isinstance(value, ModelStorage))):
+                        # JCA : Add log to help debugging
+                        logging.getLogger().debug(
+                            'Field %s of %s is required' %
+                            (field_name, cls.__name__))
                         raise RequiredValidationError(
                             gettext('ir.msg_required_validation_record',
                                 **cls.__names__(field_name)))
@@ -1277,7 +1281,10 @@ class ModelStorage(Model):
                                 test = sel_func()
                             else:
                                 test = sel_func(record)
-                            test = set(dict(test))
+                            try:
+                                test = set(dict(test))
+                            except:
+                                raise Exception((test, field_name, cls))
                         # None and '' are equivalent
                         if '' in test or None in test:
                             test.add('')
@@ -1288,6 +1295,11 @@ class ModelStorage(Model):
                             values = value or []
                         for value in values:
                             if value not in test:
+                                logging.getLogger().debug(
+                                    'Bad Selection : field %s of model %s :'
+                                    ' %s is not in %s' % (
+                                        field_name, cls.__name__, value,
+                                        test))
                                 error_args = cls.__names__(field_name)
                                 error_args['value'] = value
                                 raise SelectionValidationError(gettext(
@@ -1336,7 +1348,7 @@ class ModelStorage(Model):
     def _clean_defaults(cls, defaults):
         pool = Pool()
         vals = {}
-        for field in defaults.keys():
+        for field in list(defaults.keys()):
             if '.' in field:  # skip all related fields
                 continue
             fld_def = cls._fields[field]
@@ -1460,10 +1472,9 @@ class ModelStorage(Model):
         # add datetime_field
         for field in list(ffields.values()):
             if hasattr(field, 'datetime_field') and field.datetime_field:
+                datetime_field = self._fields[field.datetime_field]
+                ffields[field.datetime_field] = datetime_field
                 require_context_field = True
-                if field.datetime_field not in ffields:
-                    datetime_field = self._fields[field.datetime_field]
-                    ffields[field.datetime_field] = datetime_field
 
         # add depends of field with context
         for field in list(ffields.values()):
@@ -1472,9 +1483,9 @@ class ModelStorage(Model):
                 for context_field_name in eval_fields:
                     if context_field_name not in field.depends:
                         continue
+                    context_field = self._fields.get(context_field_name)
                     require_context_field = True
-                    if context_field_name not in ffields:
-                        context_field = self._fields.get(context_field_name)
+                    if context_field not in ffields:
                         ffields[context_field_name] = context_field
 
         def filter_(id_):
@@ -1496,7 +1507,9 @@ class ModelStorage(Model):
 
         def instantiate(field, value, data):
             if field._type in ('many2one', 'one2one', 'reference'):
-                if value is None or value is False:
+                # ABDC: Fix when data is an empty string, we should return
+                # None
+                if value is None or value is False or value == '':
                     return None
             elif field._type in ('one2many', 'many2many'):
                 if not value:
@@ -1562,7 +1575,6 @@ class ModelStorage(Model):
                 read_data = self.read(list(ids), list(ffields.keys()))
             # create browse records for 'remote' models
             for data in read_data:
-                to_delete = set()
                 for fname, field in ffields.items():
                     fvalue = data[fname]
                     if field._type in ('many2one', 'one2one', 'one2many',
@@ -1581,11 +1593,10 @@ class ModelStorage(Model):
                             or field.context
                             or getattr(field, 'datetime_field', None)
                             or isinstance(field, fields.Function)):
-                        to_delete.add(fname)
+                        del data[fname]
                 if data['id'] not in self._cache:
                     self._cache[data['id']] = {}
-                self._cache[data['id']].update(
-                    **{k: v for k, v in data.items() if k not in to_delete})
+                self._cache[data['id']].update(data)
         return value
 
     @property
@@ -1691,12 +1702,12 @@ class ModelStorage(Model):
                         or context != record._context):
                     latter.append(record)
                     continue
-                save_values[record] = record._save_values
-                values[record] = record._values
+                save_values[id(record)] = record._save_values
+                values[id(record)] = record._values
                 record._values = None
                 if record.id is None or record.id < 0:
                     to_create.append(record)
-                elif save_values[record]:
+                elif save_values[id(record)]:
                     to_write.append(record)
             transaction = Transaction()
             try:
@@ -1705,17 +1716,20 @@ class ModelStorage(Model):
                         transaction.reset_context(), \
                         transaction.set_context(context):
                     if to_create:
-                        news = cls.create([save_values[r] for r in to_create])
+                        # ABE: use records addresses as keys instead of records
+                        news = cls.create(
+                            [save_values[id(r)] for r in to_create])
                         for record, new in zip(to_create, news):
                             record._ids.remove(record.id)
                             record._id = new.id
                             record._ids.append(record.id)
                     if to_write:
                         cls.write(*sum(
-                                (([r], save_values[r]) for r in to_write), ()))
+                                (([r], save_values[id(r)]) for r in to_write),
+                                ()))
             except Exception:
                 for record in to_create + to_write:
-                    record._values = values[record]
+                    record._values = values[id(record)]
                 raise
             for record in to_create + to_write:
                 record._init_values = None

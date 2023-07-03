@@ -276,8 +276,9 @@ class ModelSQL(ModelStorage):
                 elif ref:
                     table.add_fk(field_name, ref, field.ondelete)
 
-            table.index_action(
-                field_name, action=field.select and 'add' or 'remove')
+            # Do not remove previously set indexes
+            if field.select:
+                table.index_action(field_name, action='add')
 
             required = field.required
             # Do not set 'NOT NULL' for Binary field as the database column
@@ -723,24 +724,29 @@ class ModelSQL(ModelStorage):
             in_max = 1
             table = cls.__table_history__()
             column = Coalesce(table.write_date, table.create_date)
-            history_clause = (column <= Transaction().context['_datetime'])
+            if Transaction().context.get('_datetime_exclude', False):
+                history_clause = (column < Transaction().context['_datetime'])
+            else:
+                history_clause = (column <= Transaction().context['_datetime'])
             history_order = (column.desc, Column(table, '__id').desc)
             history_limit = 1
 
-        columns = []
+        columns = {}
         for f in all_fields:
             field = cls._fields.get(f)
             if field and field.sql_type():
-                columns.append(field.sql_column(table).as_(f))
+                columns[f] = field.sql_column(table).as_(f)
             elif f == '_timestamp' and not callable(cls.table_query):
                 sql_type = fields.Char('timestamp').sql_type().base
-                columns.append(Extract('EPOCH',
-                        Coalesce(table.write_date, table.create_date)
-                        ).cast(sql_type).as_('_timestamp'))
+                columns[f] = Extract(
+                    'EPOCH', Coalesce(table.write_date, table.create_date)
+                    ).cast(sql_type).as_('_timestamp')
 
-        if len(columns):
+        if 'write_date' not in fields_names and len(columns) == 1:
+            columns.pop('write_date')
+        if columns:
             if 'id' not in fields_names:
-                columns.append(table.id.as_('id'))
+                columns['id'] = table.id.as_('id')
 
             tables = {None: (table, None)}
             if domain:
@@ -755,7 +761,7 @@ class ModelSQL(ModelStorage):
                     where &= history_clause
                 if domain:
                     where &= dom_exp
-                cursor.execute(*from_.select(*columns, where=where,
+                cursor.execute(*from_.select(*columns.values(), where=where,
                         order_by=history_order, limit=history_limit))
                 fetchall = list(cursor_dict(cursor))
                 if not len(fetchall) == len({}.fromkeys(sub_ids)):
@@ -771,9 +777,7 @@ class ModelSQL(ModelStorage):
         max_write_date = max(
             (r['write_date'] for r in result if r.get('write_date')),
             default=None)
-        for column in columns:
-            # Split the output name to remove SQLite type detection
-            fname = column.output_name.split()[0]
+        for fname, column in columns.items():
             if fname == '_timestamp':
                 continue
             field = cls._fields[fname]
@@ -836,11 +840,15 @@ class ModelSQL(ModelStorage):
                         date_result = date_results[fname]
                         row[fname] = date_result[row['id']]
             else:
-                getter_results = field.get(ids, cls, field_list, values=result)
-                for fname in field_list:
-                    getter_result = getter_results[fname]
-                    for row in result:
-                        row[fname] = getter_result[row['id']]
+                for sub_results in grouped_slice(result, cache_size()):
+                    sub_results = list(sub_results)
+                    sub_ids = [r['id'] for r in sub_results]
+                    getter_results = field.get(
+                        sub_ids, cls, field_list, values=sub_results)
+                    for fname in field_list:
+                        getter_result = getter_results[fname]
+                        for row in sub_results:
+                            row[fname] = getter_result[row['id']]
 
         def read_related(field, Target, rows, fields):
             name = field.name
@@ -881,7 +889,9 @@ class ModelSQL(ModelStorage):
 
         to_del = set()
         for fname in set(fields_related.keys()) | extra_fields:
-            if fname not in fields_names:
+            # 'write_date' has been added to extra_fields but not read
+            if ((fname != 'write_date' or 'write_date' in columns)
+                    and fname not in fields_names):
                 to_del.add(fname)
             if fname not in cls._fields:
                 continue
@@ -1340,6 +1350,12 @@ class ModelSQL(ModelStorage):
 
             to_delete = set()
             history = cls.__table_history__()
+            if transaction.context.get('_datetime_exclude', False):
+                history_clause = (
+                    history.write_date < transaction.context['_datetime'])
+            else:
+                history_clause = (
+                    history.write_date <= transaction.context['_datetime'])
             for sub_ids in grouped_slice([r['id'] for r in rows]):
                 where = reduce_ids(history.id, sub_ids)
                 cursor.execute(*history.select(
@@ -1348,8 +1364,7 @@ class ModelSQL(ModelStorage):
                         where=where
                         & (history.write_date != Null)
                         & (history.create_date == Null)
-                        & (history.write_date
-                            <= transaction.context['_datetime'])))
+                        & history_clause))
                 for deleted_id, delete_date in cursor.fetchall():
                     history_date, _ = ids_history[deleted_id]
                     if isinstance(history_date, str):
@@ -1436,8 +1451,11 @@ class ModelSQL(ModelStorage):
 
         if cls._history and transaction.context.get('_datetime'):
             table, _ = tables[None]
-            expression &= (Coalesce(table.write_date, table.create_date)
-                <= transaction.context['_datetime'])
+            hcolumn = Coalesce(table.write_date, table.create_date)
+            if transaction.context.get('_datetime_exclude', False):
+                expression &= (hcolumn < transaction.context['_datetime'])
+            else:
+                expression &= (hcolumn <= transaction.context['_datetime'])
         return tables, expression
 
     @classmethod

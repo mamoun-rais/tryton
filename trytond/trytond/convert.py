@@ -353,7 +353,7 @@ class Fs2bdAccessor:
         if fs_id not in self.fs2db[module]:
             self.fs2db[module][fs_id] = {}
         fs2db_val = self.fs2db[module][fs_id]
-        for key, val in values.items():
+        for key, val in list(values.items()):
             fs2db_val[key] = val
 
     def reset_browsercord(self, module, model_name, ids=None):
@@ -390,7 +390,7 @@ class Fs2bdAccessor:
             record_ids[rec.model].append(rec.db_id)
 
         self.browserecord[module] = {}
-        for model_name in record_ids.keys():
+        for model_name in list(record_ids.keys()):
             try:
                 Model = self.pool.get(model_name)
             except KeyError:
@@ -663,7 +663,12 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
                 # expected value differs from the actual value, _and_
                 # if they are not false in a boolean context (ie None,
                 # False, {} or [])
-                if db_field != expected_value and (db_field or expected_value):
+
+                # RSE #19451
+                # The verification should be made only on noupdate mode,
+                # otherwise the DB should be squashed with the XML content
+                if self.noupdate and db_field != expected_value and (
+                        db_field or expected_value):
                     logger.warning(
                         "Field %s of %s@%s not updated (id: %s), because "
                         "it has changed since the last update",
@@ -694,6 +699,7 @@ class TrytondXmlHandler(sax.handler.ContentHandler):
 
         mdata_values = []
         for record, values, fs_id in zip(records, vlist, fs_ids):
+            logger.debug(self.module + ':loading ' + fs_id)
             for key in values:
                 values[key] = self._clean_value(key, record)
 

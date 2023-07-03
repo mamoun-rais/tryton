@@ -2,6 +2,7 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of this
 # repository contains the full copyright notices and license terms.
 
+import random
 import unittest
 import time
 from unittest.mock import patch, call
@@ -45,6 +46,22 @@ class ModelSQLTestCase(unittest.TestCase):
         values = Model.read([record.id], ['name'])
 
         self.assertEqual(values, [{'id': record.id, 'name': "Record"}])
+
+    @with_transaction()
+    def test_read_function_field_bigger_than_cache(self):
+        "Test reading a Function field on a list bigger then the cache size"
+        pool = Pool()
+        Model = pool.get('test.modelsql.read')
+
+        records = Model.create([{'name': str(i)} for i in range(10)])
+        records_created = {m.id: m.name for m in records}
+        record_ids = [r.id for r in records]
+        random.shuffle(record_ids)
+
+        with Transaction().set_context(_record_cache_size=2):
+            records_read = {r['id']: r['rec_name']
+                for r in Model.read(record_ids, ['rec_name'])}
+            self.assertEqual(records_read, records_created)
 
     @with_transaction()
     def test_read_related_2one(self):
@@ -555,32 +572,6 @@ class ModelSQLTranslationTestCase(unittest.TestCase):
 
         Transaction().commit()
 
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        cls.restore_language()
-
-    @classmethod
-    @with_transaction()
-    def restore_language(cls):
-        pool = Pool()
-        Language = pool.get('ir.lang')
-        Configuration = pool.get('ir.configuration')
-
-        english, = Language.search([('code', '=', 'en')])
-        english.translatable = True
-        english.save()
-
-        config = Configuration(1)
-        config.language = 'en'
-        config.save()
-
-        Language.write(Language.search([('code', '!=', 'en')]), {
-                'translatable': False,
-                })
-
-        Transaction().commit()
-
     @with_transaction()
     def test_create_default_language(self):
         "Test create default language"
@@ -767,89 +758,6 @@ class ModelSQLTranslationTestCase(unittest.TestCase):
 
         self.assertEqual(record.name, "Foo")
         self.assertEqual(other.name, "Baz")
-
-    @with_transaction()
-    def test_order_empty_translation(self):
-        "Test order on empty translation value"
-        pool = Pool()
-        Model = pool.get('test.modelsql.translation')
-        Translation = pool.get('ir.translation')
-
-        with Transaction().set_context(language=self.default_language):
-            records = Model.create(
-                [{'name': "A"}, {'name': "B"}, {'name': "C"}])
-
-        translation, = Translation.search([
-                ('lang', '=', self.default_language),
-                ('name', '=', 'test.modelsql.translation,name'),
-                ('type', '=', 'model'),
-                ('res_id', '=', records[1].id),
-                ])
-        translation.value = ''
-        translation.save()
-
-        with Transaction().set_context(language=self.default_language):
-            self.assertEqual(
-                Model.search([], order=[('name', 'ASC')]),
-                records)
-
-    @with_transaction()
-    def test_search_unique_result(self):
-        "Test unique result on search"
-        pool = Pool()
-        Model = pool.get('test.modelsql.translation')
-        Translation = pool.get('ir.translation')
-
-        with Transaction().set_context(language=self.default_language):
-            record, = Model.create([{'name': "Foo"}])
-        with Transaction().set_context(language=self.other_language):
-            Model.write([record], {'name': "Bar"})
-
-        translation, = Translation.search([
-                ('lang', '=', self.other_language),
-                ('name', '=', 'test.modelsql.translation,name'),
-                ('type', '=', 'model'),
-                ('res_id', '=', record.id),
-                ])
-        Translation.copy([translation], default={'value': "Baz"})
-
-        with Transaction().set_context(language=self.other_language):
-            self.assertEqual(
-                Model.search([('name', 'like', 'Ba%')]),
-                [record])
-            self.assertEqual(
-                Model.search([], order=[('name', 'DESC')]),
-                [record])
-
-    @unittest.skipIf(backend.name != 'postgresql',
-        "Only PostgreSQL support DISTINCT ON")
-    @with_transaction()
-    def test_search_last_translation(self):
-        "Test unique result on search"
-        pool = Pool()
-        Model = pool.get('test.modelsql.translation')
-        Translation = pool.get('ir.translation')
-
-        with Transaction().set_context(language=self.default_language):
-            record, = Model.create([{'name': "Foo"}])
-        with Transaction().set_context(language=self.other_language):
-            Model.write([record], {'name': "Bar"})
-
-        translation, = Translation.search([
-                ('lang', '=', self.other_language),
-                ('name', '=', 'test.modelsql.translation,name'),
-                ('type', '=', 'model'),
-                ('res_id', '=', record.id),
-                ])
-        Translation.copy([translation], default={'value': "Baz"})
-
-        with Transaction().set_context(language=self.other_language):
-            self.assertEqual(
-                Model.search([('name', '=', 'Baz')]),
-                [record])
-            self.assertEqual(
-                Model.search([('name', '=', 'Bar')]),
-                [])
 
 
 def suite():
