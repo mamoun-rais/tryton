@@ -122,12 +122,12 @@ class Currency(DeactivableMixin, ModelSQL, ModelView):
                 res[currency.id] = rates[0].id
             else:
                 res[currency.id] = 0
-        rate_ids = [x for x in res.values() if x]
+        rate_ids = [x for x in list(res.values()) if x]
         rates = Rate.browse(rate_ids)
         id2rate = {}
         for rate in rates:
             id2rate[rate.id] = rate
-        for currency_id in res.keys():
+        for currency_id in list(res.keys()):
             if res[currency_id]:
                 res[currency_id] = id2rate[res[currency_id]].rate
         return res
