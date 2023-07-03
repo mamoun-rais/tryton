@@ -51,14 +51,10 @@ class Country(DeactivableMixin, ModelSQL, ModelView):
 
     @classmethod
     def search_rec_name(cls, name, clause):
-        if clause[1].startswith('!') or clause[1].startswith('not '):
-            bool_op = 'AND'
-        else:
-            bool_op = 'OR'
         code_value = clause[2]
         if clause[1].endswith('like'):
             code_value = lstrip_wildcard(clause[2])
-        return [bool_op,
+        return ['OR',
             ('name',) + tuple(clause[1:]),
             ('code', clause[1], code_value) + tuple(clause[3:]),
             ('code3', clause[1], code_value) + tuple(clause[3:]),
@@ -230,16 +226,9 @@ class Subdivision(DeactivableMixin, ModelSQL, ModelView):
 
     @classmethod
     def search_rec_name(cls, name, clause):
-        if clause[1].startswith('!') or clause[1].startswith('not '):
-            bool_op = 'AND'
-        else:
-            bool_op = 'OR'
-        code_value = clause[2]
-        if clause[1].endswith('like'):
-            code_value = lstrip_wildcard(clause[2])
-        return [bool_op,
+        return ['OR',
             ('name',) + tuple(clause[1:]),
-            ('code', clause[1], code_value) + tuple(clause[3:]),
+            ('code',) + tuple(clause[1:]),
             ]
 
     @classmethod
@@ -304,10 +293,7 @@ class PostalCode(ModelSQL, ModelView):
             bool_op = 'AND'
         else:
             bool_op = 'OR'
-        code_value = clause[2]
-        if clause[1].endswith('like'):
-            code_value = lstrip_wildcard(clause[2])
         return [bool_op,
-            ('postal_code', clause[1], code_value) + tuple(clause[3:]),
+            ('postal_code',) + tuple(clause[1:]),
             ('city',) + tuple(clause[1:]),
             ]
