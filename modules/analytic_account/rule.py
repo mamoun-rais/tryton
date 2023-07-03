@@ -40,14 +40,6 @@ class Rule(sequence_ordered(), MatchMixin, AnalyticMixin, ModelSQL, ModelView):
         depends=['company'])
 
     @classmethod
-    def __setup__(cls):
-        super().__setup__()
-        cls.analytic_accounts.domain = [
-            ('company', '=', Eval('company', -1)),
-            ]
-        cls.analytic_accounts.depends.append('company')
-
-    @classmethod
     def default_company(cls):
         return Transaction().context.get('company')
 
