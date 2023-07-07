@@ -194,9 +194,17 @@ Paid 50 to supplier::
 
 Validate statement::
 
-    >>> statement.click('dummy_validate_method')
+    >>> statement.click('validate_statement')
     >>> statement.state
     'validated'
+
+Try posting a move::
+
+    >>> statement_line = statement.lines[0]
+    >>> statement_line.move.click('post')  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+        ...
+    trytond.modules.account.exceptions.PostError: ...
 
 Cancel statement::
 
@@ -211,7 +219,7 @@ Reset to draft, validate and post statement::
     >>> statement.click('draft')
     >>> statement.state
     'draft'
-    >>> statement.click('dummy_validate_method')
+    >>> statement.click('validate_statement')
     >>> statement.state
     'validated'
     >>> statement.click('post')
@@ -346,13 +354,16 @@ Testing the use of an invoice in multiple statements::
     >>> statement_line.related_to = customer_invoice4
     >>> statement2.save()
 
+    >>> statement1.click('validate_statement') # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+        ...
+    StatementValidateWarning: ...
+    >>> statement2.reload()
     >>> Model.get('res.user.warning')(user=config.user,
     ...     name=str(statement2.lines[0].id), always=True).save()
-
-    >>> statement1.click('dummy_validate_method')
-    >>> statement1.click('post')
+    >>> statement1.click('validate_statement')
     >>> statement1.state
-    'posted'
+    'validated'
 
     >>> statement1.reload()
     >>> bool(statement1.lines[0].related_to)
@@ -379,8 +390,7 @@ Testing balance validation::
     >>> line.amount = Decimal('60.00')
     >>> line.account = receivable
     >>> line.party = customer
-    >>> statement.click('dummy_validate_method')
-    >>> statement.click('post')  # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> statement.click('validate_statement')  # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
         ...
     StatementValidateError: ...
@@ -390,8 +400,7 @@ Testing balance validation::
     >>> second_line.amount = Decimal('40.00')
     >>> second_line.account = receivable
     >>> second_line.party = customer
-    >>> statement.click('dummy_validate_method')
-    >>> statement.click('post')
+    >>> statement.click('validate_statement')
 
 Testing amount validation::
 
@@ -410,10 +419,9 @@ Testing amount validation::
     >>> line.amount = Decimal('50.00')
     >>> line.account = receivable
     >>> line.party = customer
-    >>> statement.click('dummy_validate_method')
-    >>> statement.click('post') # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> statement.click('validate_statement')  # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
-    ...
+        ...
     StatementValidateError: ...
 
     >>> second_line = statement.lines.new()
@@ -421,8 +429,7 @@ Testing amount validation::
     >>> second_line.amount = Decimal('30.00')
     >>> second_line.account = receivable
     >>> second_line.party = customer
-    >>> statement.click('dummy_validate_method')
-    >>> statement.click('post')
+    >>> statement.click('validate_statement')
 
 Test number of lines validation::
 
@@ -441,23 +448,21 @@ Test number of lines validation::
     >>> line.amount = Decimal('50.00')
     >>> line.account = receivable
     >>> line.party = customer
-    >>> statement.click('dummy_validate_method')
-    >>> statement.click('post')   # doctest: +IGNORE_EXCEPTION_DETAIL
+    >>> statement.click('validate_statement')  # doctest: +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
-    ...
+        ...
     StatementValidateError: ...
-
 
     >>> second_line = statement.lines.new()
     >>> second_line.date = today
     >>> second_line.amount = Decimal('10.00')
     >>> second_line.account = receivable
     >>> second_line.party = customer
-    >>> statement.click('dummy_validate_method')
+    >>> statement.click('validate_statement')
 
 Validate empty statement::
 
     >>> statement = Statement(name='empty', journal=statement_journal)
     >>> statement.end_balance = statement.start_balance
-    >>> statement.click('dummy_validate_method')
+    >>> statement.click('validate_statement')
 
