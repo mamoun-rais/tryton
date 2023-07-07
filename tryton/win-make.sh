@@ -53,9 +53,14 @@ clean() {
 build() {
     clean
     local v; v=$(version)
-    python3.6 setup-freeze.py install_exe -d dist
-    makensis -DVERSION="$v" -DSERIES="$v" setup.nsi
-    makensis -DVERSION="$v" setup-single.nsi
+    python setup.py compile_catalog
+    python setup-freeze.py install_exe -d dist
+    "C:/PSTools/PsExec.exe" -u Administrator -p ${WINDOWS_USER_PASSWORD} "C:\msys32\home\Administrator\tryton\tryton\sign-client.bat" ${CERTIFICAT_PASSWORD}
+    makensis -DVERSION="$v" -DBITS=32 -DSERIES="$v" setup.nsi
+    # makensis -DVERSION="$v" -DBITS=32 setup-single.nsi
+    mv dist "$v"
+    "C:/PSTools/PsExec.exe" -u Administrator -p ${WINDOWS_USER_PASSWORD} "C:\msys32\home\Administrator\tryton\tryton\sign-client.bat" ${CERTIFICAT_PASSWORD}
+    zip -q -9 -r "coog-$v.zip" "$v"
 }
 
 upload() {
