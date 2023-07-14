@@ -304,8 +304,6 @@ def load_module_graph(graph, pool, update=None, lang=None):
             Model.clean()
             ModelField = pool.get('ir.model.field')
             ModelField.clean()
-            Cache._reset[transaction] = set(
-                caches_to_clear + list(Cache._reset.get(transaction, [])))
             transaction.commit()
 
         # JCA: Add update parameter to post init hooks
