@@ -1,4 +1,5 @@
 include:
-  - project: $CI_PROJECT_PATH
+  - project: "coopengo/devops/gitlab-ci-template"
     ref: master
-    file: .gitlab-ci.yml
+    file:
+      - "/Project/tryton/.gitlab-ci.yml"
