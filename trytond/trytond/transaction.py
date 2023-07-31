@@ -57,6 +57,7 @@ class Transaction(object):
     delete_records = None
     delete = None  # TODO check to merge with delete_records
     trigger_records = None
+    check_warnings = None
     timestamp = None
     started_at = None
 
@@ -118,6 +119,7 @@ class Transaction(object):
         self.delete_records = {}
         self.delete = {}
         self.trigger_records = defaultdict(set)
+        self.check_warnings = set()
         self.timestamp = {}
         self.counter = 0
         self._datamanagers = []
