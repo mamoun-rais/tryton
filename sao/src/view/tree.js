@@ -1565,20 +1565,33 @@
         },
         toggle_row: function() {
             if (this.is_expanded()) {
-                this.update_expander(false);
-                this.tree.expanded.delete(this);
-                this.collapse_children();
+                this.collapse_row();
             } else {
-                if (this.tree.n_children(this) > Sao.config.limit) {
-                    this.tree.record = this.record;
-                    this.tree.screen.switch_view('form');
-                } else {
-                    this.update_expander(true);
-                    this.tree.expanded.add(this);
-                    this.expand_children();
-                }
+                this.expand_row();
             }
             return false;
+        },
+        expand_row: function() {
+            if (this.tree.n_children(this) > Sao.config.limit) {
+                this.tree.record = this.record;
+                this.tree.screen.switch_view('form');
+            } else {
+                this.update_expander(true);
+                this.tree.expanded.add(this);
+                this.expand_children();
+            }
+        },
+        collapse_row: function() {
+            if (this.children_field) {
+                for (const row of this.rows) {
+                    if (row.exception) {
+                        row.record.unload();
+                    }
+                }
+            }
+            this.update_expander(false);
+            this.tree.expanded.delete(this);
+            this.collapse_children();
         },
         update_expander: function(expanded) {
             var icon;
