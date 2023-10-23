@@ -65,7 +65,6 @@ def _get_modules(cursor):
 
 class BaseCache(object):
     _instances = {}
-<<<<<<< HEAD
 
     def __init__(self, name, size_limit=1024, duration=None, context=True):
         self._name = name
