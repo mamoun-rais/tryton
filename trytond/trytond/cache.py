@@ -100,7 +100,7 @@ class BaseCache(object):
             context = Transaction().context.copy()
             for to_pop in {
                     'client', '_request', '_check_access', '_skip_warnings',
-                    'session', 'token'}:
+                    'session', 'token', 'rec_name_key'}:
                 context.pop(to_pop, None)
             return (key, Transaction().user, freeze(context))
         return key
