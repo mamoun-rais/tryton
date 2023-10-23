@@ -135,6 +135,13 @@ class Eval(PYSON):
         self._value = v
         self._default = d
 
+    def __repr__(self):
+        if isinstance(self._value, str) and not self._default:
+            return f'rec.{self._value}'
+        else:
+            return f'Eval({repr(self._value)}' + (
+                ')' if not self._default else f', {repr(self._default)})')
+
     @property
     def __repr_params__(self):
         return self._value, self._default
@@ -183,6 +190,17 @@ class Not(PYSON):
             v = bool(v)
         self._value = v
 
+    def __repr__(self):
+        if isinstance(self._value, Not):
+            return repr(self._value._value)
+        elif isinstance(self._value, Equal):
+            val = self._value
+            return f'({repr(val._statement1)} ≠ {repr(val._statement2)})'
+        elif isinstance(self._value, In):
+            val = self._value
+            return f'({repr(val._key)} not in {repr(val._obj)})'
+        return f'!({repr(self._value)})'
+
     @property
     def __repr_params__(self):
         return (self._value,)
@@ -206,6 +224,9 @@ class Bool(PYSON):
     def __init__(self, v):
         super(Bool, self).__init__()
         self._value = v
+
+    def __repr__(self):
+        return repr(self._value)
 
     @property
     def __repr_params__(self):
@@ -239,6 +260,9 @@ class And(PYSON):
         assert len(statements) >= 2, 'must have at least 2 statements'
         self._statements = statements
 
+    def __repr__(self):
+        return '(' + ' & '.join(repr(x) for x in self._statements) + ')'
+
     @property
     def __repr_params__(self):
         return tuple(self._statements)
@@ -258,6 +282,9 @@ class And(PYSON):
 
 
 class Or(And):
+
+    def __repr__(self):
+        return '(' + ' | '.join(repr(x) for x in self._statements) + ')'
 
     def pyson(self):
         res = super(Or, self).pyson()
@@ -285,6 +312,9 @@ class Equal(PYSON):
         assert types1 == types2, 'statements must have the same type'
         self._statement1 = statement1
         self._statement2 = statement2
+
+    def __repr__(self):
+        return f'({repr(self._statement1)} = {repr(self._statement2)})'
 
     @property
     def __repr_params__(self):
@@ -329,6 +359,10 @@ class Greater(PYSON):
         self._statement1 = statement1
         self._statement2 = statement2
         self._equal = equal
+
+    def __repr__(self):
+        operator = ' ≥ ' if self._equal else ' > '
+        return f'({repr(self._statement1)} {operator} {repr(self._statement2)})'
 
     @property
     def __repr_params__(self):
@@ -378,6 +412,10 @@ class Less(Greater):
         res = super(Less, self).pyson()
         res['__class__'] = 'Less'
         return res
+
+    def __repr__(self):
+        operator = ' ≤ ' if self._equal else ' < '
+        return f'({repr(self._statement1)} {operator} {repr(self._statement2)})'
 
     @staticmethod
     def eval(dct, context):
@@ -509,6 +547,9 @@ class In(PYSON):
         self._key = key
         self._obj = obj
 
+    def __repr__(self):
+        return f'({repr(self._key)} in {repr(self._obj)})'
+
     @property
     def __repr_params__(self):
         return (self._key, self._obj)
@@ -556,6 +597,11 @@ class Date(PYSON):
         self._delta_months = delta_months
         self._delta_days = delta_days
         self._start = start
+
+    def __repr__(self):
+        if all(not x for x in self.__repr_params__):
+            return 'Today()'
+        return super().__repr__()
 
     @property
     def __repr_params__(self):
