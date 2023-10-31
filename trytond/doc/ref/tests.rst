@@ -28,7 +28,10 @@ set then Tryton will restore a backup found in the directory pointed by
 Otherwise it will proceed to the creation of the database and the activation of
 the module.
 
-==============
+``DB_CACHE_JOBS`` environment variable defines the number of jobs used for
+dump and restore operations.
+The default value is the number of CPU.
+
 ModuleTestCase
 ==============
 
