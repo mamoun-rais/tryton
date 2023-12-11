@@ -7,8 +7,6 @@ import urllib.parse
 
 import __main__ as main
 
-from . import status
-
 __all__ = ['config', 'get_hostname', 'get_port', 'split_netloc',
     'parse_listen', 'parse_uri']
 logger = logging.getLogger(__name__)
@@ -106,6 +104,8 @@ class TrytonConfigParser(configparser.ConfigParser):
         self.set('bus', 'cache_timeout', '5')
         self.set('bus', 'select_timeout', '5')
         self.add_section('html')
+        self.add_section('custom')
+        self.set('custom', 'enable_stat_thread', 'False')
         self.update_environ()
         self.update_etc()
 
@@ -175,4 +175,5 @@ class TrytonConfigParser(configparser.ConfigParser):
 config = TrytonConfigParser()
 
 if os.path.basename(getattr(main, '__file__', '')) != 'trytond-stat':
+    from . import status
     status.start(config.get('database', 'path'))
