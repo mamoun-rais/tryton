@@ -33,8 +33,6 @@ MODULES = []
 
 EGG_MODULES = {}
 
-AUTO_UNINSTALL = os.environ.get('COOG_AUTO_UNINSTALL')
-
 
 def update_egg_modules():
     global EGG_MODULES
@@ -439,13 +437,8 @@ def load_modules(
             if (module_in_db in modules_in_dir
                     or module_in_db in modules_to_migrate):
                 continue
-            elif AUTO_UNINSTALL:
-                logger.warning(f'{module_in_db} is about to be uninstalled')
-                modules_to_migrate[module_in_db] = ('to_drop', None)
             else:
-                logger.critical(f'To uninstall {module_in_db} you should set '
-                    'COOG_AUTO_UNINSTALL environnement variable')
-                sys.exit(1)
+                modules_to_migrate[module_in_db] = ('to_drop', None)
 
         def rename(cursor, table_name, old_name, new_name, var_name):
             table = Table(table_name)
