@@ -9,7 +9,8 @@ GITHUB_TOKEN=$2
 
 version() {
     local t
-    t=$(git describe --tags --exact-match 2> /dev/null | grep "^coog-" | head -1)
+    # t=$(git describe --tags --exact-match 2> /dev/null | grep "^coog-" | head -1)
+    t=$(git log --first-parent --pretty=%d | grep -o 'tag: [^,)]*' | awk '{print $2}' | grep -v '\-rc' | grep -Eo 'coog-[0-9]{1,2}.[0-9]{1,2}.[0-9]{4}(.[0-9]+)?$' | head -n 1)
     if [ ! -z "$t" ]
     then
         echo "${t//coog-/}"
