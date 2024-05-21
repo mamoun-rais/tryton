@@ -1421,7 +1421,13 @@
             screen.switch_view().done(function() {
                 el.append(screen.screen_container.el);
             });
-            return el;
+
+            var resizer = jQuery('<div/>', {
+                'class': 'preview-resizer',
+            }).append(jQuery('<div/>', {
+                'class': 'preview-resizer-content',
+            }).append(el));
+            return resizer;
         },
         refresh_attachment_preview: function(force) {
             if (!this.attachment_screen) {
