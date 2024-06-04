@@ -2685,7 +2685,6 @@
             this.suffixes = [];
             this.header = null;
             this.footers = [];
-            this._visible_header = true;
         },
         get field_name() {
             return this.attributes.name;
@@ -2716,10 +2715,8 @@
                 this.field.set_state(record);
                 var state_attrs = this.field.get_state_attrs(record);
                 if (state_attrs.invisible) {
-                    this._visible_header = false;
                     cell.hide();
                 } else {
-                    this._visible_header = true;
                     cell.show();
                 }
             };
@@ -2747,19 +2744,18 @@
             for (const cell of cells) {
                 if (visible) {
                     cell.show();
-                    this._visible_header = true;
                     cell.removeClass('invisible');
                 } else {
                     cell.hide();
-                    this._visible_header = false;
                     cell.addClass('invisible');
                 }
             }
         },
         get_visible: function() {
             // 480px is bootstrap's screen-xs-max
-            return (window.visualViewport.width > 480) && this._visible_header;
-        },
+            return ((window.visualViewport.width > 480) &&
+                !this.header.hasClass('invisible'));
+        }
     });
 
     Sao.View.Tree.TextColum = Sao.class_(Sao.View.Tree.CharColumn, {
@@ -3255,7 +3251,6 @@
             this.type = 'button';
             this.attributes = attributes;
             this.footers = [];
-            this._visible_header = true;
         },
         render: function(record, el) {
             var button = new Sao.common.Button(this.attributes, el, 'btn-sm');
@@ -3281,17 +3276,16 @@
             for (const cell of cells) {
                 if (visible) {
                     cell.show();
-                    this._visible_header = true;
                     cell.removeClass('invisible');
                 } else {
                     cell.hide();
-                    this._visible_header = false;
                     cell.addClass('invisible');
                 }
             }
         },
         get_visible: function() {
-            return this._visible_header && !this.header.hasClass('invisible');
+            return ((window.visualViewport.width > 480) &&
+                !this.header.hasClass('invisible'));
         },
         button_clicked: function(event) {
             var record = event.data[0];
