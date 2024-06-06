@@ -138,6 +138,7 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
     # Prevent to import backend when importing module
     from trytond.cache import Cache
     from trytond.ir.lang import get_parent_language
+    from trytond.model.modelsql import define_indexes
 
     if lang is None:
         lang = [config.get('database', 'language')]
@@ -268,6 +269,8 @@ def load_module_graph(graph, pool, update=None, lang=None, indexes=None):
 
         # JCA: Add update parameter to post init hooks
         pool.post_init(None)
+
+        define_indexes(pool)
 
         pool.setup_mixin()
 
