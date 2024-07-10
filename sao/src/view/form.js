@@ -695,7 +695,9 @@ function eval_pyson(value){
                         // usually give a better (though non-perfect) UI
                         // this._grid_rows.push(
                         //      `minmax(min-content, ${this._row}fr)`);
-                        this._grid_rows.push('min-content');
+                        // this._grid_rows.push('min-content');
+                        // this._grid_rows.push('1fr');
+                        this._grid_rows.push('auto');
                     } else {
                         this._grid_rows.push('min-content');
                     }
@@ -2817,6 +2819,7 @@ function eval_pyson(value){
                     'readonly': 'readonly',
                 });
             widget.css('min-height', this.el.height());
+            widget.css('max-height', this.el.height());
             return widget;
         }
     });
@@ -5499,7 +5502,7 @@ function eval_pyson(value){
 
     Sao.View.Form.Dict = Sao.class_(Sao.View.Form.Widget, {
         class_: 'form-dict',
-        expand: true,
+        expand: false,
         init: function(view, attributes) {
             Sao.View.Form.Dict._super.init.call(this, view, attributes);
 
