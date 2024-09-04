@@ -378,6 +378,11 @@ class Report(URLMixin, PoolBase):
                 template.add_directives(Translator.NAMESPACE, translator)
 
     @classmethod
+    def content_io_from_report(cls, report):
+        # ABD: Hooked in report_engine to handle report style content
+        return BytesIO(report.report_content)
+
+    @classmethod
     def render(cls, report, report_context):
         "calls the underlying templating engine to renders the report"
         template = report.get_template_cached()
@@ -385,9 +390,10 @@ class Report(URLMixin, PoolBase):
             mimetype = MIMETYPES[report.template_extension]
             loader = relatorio.reporting.MIMETemplateLoader()
             klass = loader.factories[loader.get_type(mimetype)]
-            template = klass(BytesIO(report.report_content))
+            content_io = cls.content_io_from_report(report)
+            template = klass(content_io)
+            cls._callback_loader(report, template)
             report.set_template_cached(template)
-        cls._callback_loader(report, template)
         data = template.generate(**report_context).render()
         if hasattr(data, 'getvalue'):
             data = data.getvalue()
