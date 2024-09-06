@@ -85,7 +85,7 @@ Validate statement related to payment::
     >>> line.amount = Decimal('90.00')
     >>> line.account = accounts['receivable']
     >>> line.related_to = payment
-    >>> statement.click('validate_statement')
+    >>> statement.click('dummy_validate_method')
     >>> statement.state
     'validated'
 
