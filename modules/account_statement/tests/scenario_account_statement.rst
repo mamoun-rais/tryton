@@ -380,6 +380,7 @@ Testing balance validation::
     >>> line.account = receivable
     >>> line.party = customer
     >>> statement.click('dummy_validate_method')
+    >>> statement.click('post')
     Traceback (most recent call last):
         ...
     StatementValidateError: ...
@@ -410,6 +411,7 @@ Testing amount validation::
     >>> line.account = receivable
     >>> line.party = customer
     >>> statement.click('dummy_validate_method')
+    >>> statement.click('post')
     Traceback (most recent call last):
     ...
     StatementValidateError: ...
@@ -440,6 +442,7 @@ Test number of lines validation::
     >>> line.account = receivable
     >>> line.party = customer
     >>> statement.click('dummy_validate_method')
+    >>> statement.click('post')
     Traceback (most recent call last):
     ...
     StatementValidateError: ...
