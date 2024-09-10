@@ -191,7 +191,7 @@ this repository contains the full copyright notices and license terms. -->
             <field name="perm_delete" eval="True"/>
         </record>
 
-        <record model="ir.action.report" id="report_letter">
+        <!-- <record model="ir.action.report" id="report_letter">
             <field name="name">Letter</field>
             <field name="model">party.party</field>
             <field name="report_name">party.letter</field>
@@ -201,6 +201,6 @@ this repository contains the full copyright notices and license terms. -->
             <field name="keyword">form_print</field>
             <field name="model">party.party,-1</field>
             <field name="action" ref="report_letter"/>
-        </record>
+        </record> -->
     </data>
 </tryton>
