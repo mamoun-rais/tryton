@@ -86,8 +86,9 @@ Validate statement related to payment::
     >>> line.account = accounts['receivable']
     >>> line.related_to = payment
     >>> statement.click('dummy_validate_method')
+    >>> statement.click('post')
     >>> statement.state
-    'validated'
+    'posted'
 
 Check payment is succeeded::
 
