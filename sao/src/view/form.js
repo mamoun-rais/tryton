@@ -5543,7 +5543,7 @@ function eval_pyson(value){
                     'class': 'input-group input-group-sm'
                 }).appendTo(jQuery('<div>', {
                     'class': 'dict-row',
-                }).appendTo(body)));
+                }).appendTo(body));
                 this.wid_text = jQuery('<input/>', {
                     'type': 'text',
                     'class': 'form-control input-sm',
