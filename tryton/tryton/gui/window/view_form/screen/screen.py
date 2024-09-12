@@ -20,6 +20,7 @@ from tryton.common import (
     node_attributes, sur, warning)
 from tryton.common.domain_parser import DomainParser
 from tryton.config import CONFIG
+from trytond.tools.domain_inversion import canonicalize
 from tryton.gui.window.infobar import InfoBar
 from tryton.gui.window.view_form.model.group import Group
 from tryton.gui.window.view_form.view import View
