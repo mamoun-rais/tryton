@@ -1185,12 +1185,7 @@
                 }
             }
             // Take into account the selection or optional column
-            var offset = 1;
-            if (this.draggable) {
-                offset += 1;
-            } else if (this.optionals.length) {
-                offset += 1;
-            }
+            var offset = 2;
 
             const make_selector = (col_idx) => {
                 return `tr td:nth-child(${col_idx + offset + 1})`;
