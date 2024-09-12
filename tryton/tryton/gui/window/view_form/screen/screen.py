@@ -18,9 +18,9 @@ from tryton.action import Action
 from tryton.common import (
     MODELACCESS, RPCContextReload, RPCException, RPCExecute, get_monitor_size,
     node_attributes, sur, warning)
+from tryton.common.domain_inversion import canonicalize
 from tryton.common.domain_parser import DomainParser
 from tryton.config import CONFIG
-from trytond.tools.domain_inversion import canonicalize
 from tryton.gui.window.infobar import InfoBar
 from tryton.gui.window.view_form.model.group import Group
 from tryton.gui.window.view_form.view import View
