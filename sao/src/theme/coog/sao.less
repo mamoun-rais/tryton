@@ -176,6 +176,14 @@ div.wizard-form > div.wizard {
     }
 }
 
+// Align select all checkbox in trees headers
+.table > thead > tr > th.selection-state {
+    vertical-align:     middle;
+    > input:before {
+        margin-top:    2px;
+    }
+}
+
 // Make tree view headers a little more visible
 .treeview > table.tree > thead > tr:first-child th {
     .coog-group-header-colors();
@@ -207,7 +215,7 @@ nav.toolbar.panel-heading {
         padding-left:           0px;
 
         // Main tab menu: highlight tab title to show that it is clicable
-        > div.navbar-header {
+        > div.navbar-left {
             background-color:           @color-white;
             :hover, :focus-within {
                 background-color:       @color-button-hover;
