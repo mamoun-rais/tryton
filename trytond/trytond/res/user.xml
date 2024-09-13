@@ -68,13 +68,6 @@ this repository contains the full copyright notices and license terms. -->
             <field name="perm_create" eval="True"/>
             <field name="perm_delete" eval="True"/>
         </record>
-        <record model="ir.model.access" id="access_warning">
-            <field name="model">res.user.warning</field>
-            <field name="perm_read" eval="True"/>
-            <field name="perm_write" eval="True"/>
-            <field name="perm_create" eval="True"/>
-            <field name="perm_delete" eval="True"/>
-        </record>
         <record model="ir.model.button" id="user_reset_password_button">
             <field name="model">res.user</field>
             <field name="name">reset_password</field>
