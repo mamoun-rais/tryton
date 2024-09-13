@@ -378,7 +378,11 @@ div.tab-form > div.panel-body > div > div.screen-container {
 div.tab-pane {
     height: 100%;
     height: -moz-available;          /* WebKit-based browsers will ignore this. */
-    height: -webkit-fill-available
+    height: -webkit-fill-available;
+
+    > div.tab-form {
+        padding-bottom:    0px;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
