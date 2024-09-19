@@ -1150,7 +1150,6 @@ class LineGroup(ModelSQL, ModelView):
             move.write_uid,
             move.write_date,
             line.second_currency,
-            line.amount_second_currency,
             ]
 
         columns = (std_columns + [move.id.as_('move')]
