@@ -262,7 +262,6 @@ function hide_x2m_body(widget) {
             var group = new Sao.View.Form.Container(
                 Number(node.getAttribute('col') || 4));
             this.view.containers.push(group);
-            this.parse_child(node, group);
 
             if (attributes.xalign === undefined) {
                 attributes.xalign = 0.5;
@@ -287,6 +286,7 @@ function hide_x2m_body(widget) {
 
             this.view.state_widgets.push(widget);
             this.container.add(widget, attributes);
+            this.parse_child(node, group);
         },
         _parse_hpaned: function(node, attributes) {
             this._parse_paned(node, attributes, 'horizontal');
@@ -4163,6 +4163,13 @@ function hide_x2m_body(widget) {
                 }
 
                 var new_group = record.field_get_client(this.field_name);
+                if (new_group && new_group != this.screen.group) {
+                    this.screen.set_group(new_group);
+                    if ((this.screen.current_view.view_type == 'form') &&
+                        this.screen.group.length) {
+                        this.screen.current_record = this.screen.group[0];
+                    }
+                }
 
                 // [Coog specific]
                 // > multi_mixed_view see tryton/8fa02ed59d03aa52600fb8332973f6a88d46d8c0
@@ -4171,13 +4178,7 @@ function hide_x2m_body(widget) {
                         this.set_invisible(this.visible);
                     }
                 }
-                if (new_group && new_group != this.screen.group) {
-                    this.screen.set_group(new_group);
-                    if ((this.screen.current_view.view_type == 'form') &&
-                        this.screen.group.length) {
-                        this.screen.current_record = this.screen.group[0];
-                    }
-                }
+
                 var domain = [];
                 var size_limit = null;
                 if (record) {
@@ -5894,7 +5895,7 @@ function hide_x2m_body(widget) {
 
             var value = field.get_client(record);
             var new_key_names = Object.keys(value).filter(
-                e => !this.fields[e]);
+                e => !this.field.keys[e]);
 
             var prm;
             if (!jQuery.isEmptyObject(new_key_names)) {
