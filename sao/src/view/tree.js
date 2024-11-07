@@ -198,9 +198,6 @@
             }
 
             var col_idx = 1;
-            if (this.optionals.length) {
-                col_idx += 1;
-            }
             for (const column of this.columns) {
                 col = jQuery('<col/>', {
                     'class': column.attributes.widget,
@@ -375,26 +372,6 @@
             if (mutationList.length == 0) {
                 return;
             }
-            if (!this.colgroup.data('resized')) {
-                // When the tab is first opened, the width of all elements is
-                // 0. We wait for at least one non-0 element to mark the group
-                // as resized
-                var resized = false;
-                this.colgroup.find('col').each((idx, element) => {
-                    var jqElement = jQuery(element);
-                    if (!jqElement.hasClass('optional') &&
-                        !jqElement.hasClass('selection-state')) {
-                        var width = jqElement.width();
-                        if (width !== 0) {
-                            resized = true;
-                            jqElement.width(jqElement.width());
-                        }
-                    }
-                });
-                if (resized) {
-                    this.colgroup.data('resized', true);
-                }
-            }
             var mutation = mutationList.at(-1);
             var col_idx = Number(mutation.target.dataset.col) + 1;
             var width = mutation.target.style.width;
@@ -408,14 +385,22 @@
             var total_size = 0;
             // The available size for displaying the columns
             var displayed_width = this.treeview.width();
-            var max_idx;
+            var last_visible;
             this.colgroup.find('col').each((idx, element) => {
                 var jqElement = jQuery(element);
                 var matched = jqElement.css('width').match(css_width_re);
                 var size = Math.floor(
                     matched ? Number(matched[0]) : jqElement.width());
                 total_size += size;
-                max_idx = idx;
+                if (!jqElement.hasClass('optional') &&
+                    !jqElement.hasClass('selection-state')) {
+                    var width = Math.floor(jqElement.width());
+                    if (width !== 0) {
+                        last_visible = idx;
+                        jqElement.width(width + "px");
+                        jqElement.css('width', width + "px");
+                    }
+                }
             });
             if (old_width && (width != old_width)) {
                 const width_re = /^([0-9.]+)px$/i;
@@ -439,15 +424,15 @@
                         total_size -= offset;
                         if (old_value > value) {
                             // When reducing the size of a column, we way have
-                            if (displayed_width >= total_size + offset) {
+                            if (displayed_width > total_size + offset) {
                                 // If the total size of columns is less than
                                 // the visible scope of the table, we add to
                                 // the last column so the sum of column sizes
                                 // matches the displayed size
                                 this.colgroup.find('col').eq(tr_node.data('last_col'))
                                     .css('width', `${last_col_width - delta + offset}px`);
-                                total_size += offset - delta;
-                            } else if (col_idx == max_idx - 1) {
+                                total_size -= offset - delta;
+                            } else if (col_idx == last_visible - 1) {
                                 // if the total size is greater than the
                                 // visible scope, and we reduce the width of
                                 // the second to last column, we also reduce
@@ -465,6 +450,7 @@
                 }
             } else if (!old_width) {
                 this.colgroup.find('col').eq(col_idx).css('width', width);
+                this.table.css('min-width', total_size + "px)");
             }
         },
         save_width: function(tree) {
