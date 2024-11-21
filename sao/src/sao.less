@@ -274,24 +274,26 @@ html[theme="default"] {
 #tabcontent {
     display: block;
     width: 100%;
+    overflow-x: auto;
 
     > .tab-pane > .panel {
         display: flex;
         flex-direction: column;
         flex: 1;
         margin-bottom: 5px;
+        padding-bottom: 0;
+        max-width: 100%;
 
         > .panel-body {
             display: flex;
             flex: 1;
             flex-direction: row;
-            padding-top: 0;
+            padding: 0;
             min-height: 0;
+            overflow-y: auto;
 
             > div {
                 display: inline-flex;
-                padding-left: 15px;
-                padding-right: 15px;
 
                 &:first-child {
                     flex: 2;
@@ -304,6 +306,10 @@ html[theme="default"] {
         /* override bootstrap which sets display to block */
         display: flex;
         flex: 1;
+    }
+
+    .tab-wizard > .panel-body > div {
+        max-width: 100%;
     }
 }
 
