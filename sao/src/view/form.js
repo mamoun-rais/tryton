@@ -1593,6 +1593,7 @@ function hide_x2m_body(widget) {
             this.tree_elements = [];
             this.value = '';
             this.json_data = '';
+            this.prev_record = undefined;
             this.init_editor(editor_width);
         },
         init_editor: function(width){
@@ -1736,10 +1737,23 @@ function hide_x2m_body(widget) {
             let prm = Sao.View.Form.Source._super.display.call(this);
 
             var display_code = function(str){
+                // Resetting the same value will reset the view at the top,
+                // and it serves no purpose anyway
+                if (str === this.codeMirror.getValue()) {
+                    return
+                }
+                let prev_position = this.codeMirror.getScrollInfo()
                 this.codeMirror.setValue(str);
-                // Call refresh because when codemirror is initialized it's not
-                // displayed and its computation are off
                 this.codeMirror.refresh();
+                this.codeMirror.scrollTo(prev_position.left, prev_position.top);
+                // We must do this to avoid considering the previously
+                // displayed record's algorithm as an history entry for the
+                // current one (meaning using "Ctrl+Z" can replace the current
+                // algorithm with the previous record's)
+                if (this.record !== this.prev_record) {
+                    this.prev_record = this.record;
+                    this.codeMirror.clearHistory();
+                }
             }.bind(this);
 
             var display_tree = function(){
