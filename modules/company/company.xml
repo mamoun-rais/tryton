@@ -190,6 +190,6 @@ this repository contains the full copyright notices and license terms. -->
             <field name="perm_create" eval="True"/>
             <field name="perm_delete" eval="True"/>
         </record>
-
+        <!-- Coog Specific: Remove reports "Labels" and "Letter" on party -->
     </data>
 </tryton>
