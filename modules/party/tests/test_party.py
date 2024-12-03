@@ -1,48 +1,22 @@
 # This file is part of Tryton.  The COPYRIGHT file at the top level of
 # this repository contains the full copyright notices and license terms.
 import unittest
-from unittest.mock import patch
-
-from stdnum import get_cc_module
-
+import doctest
 try:
     import phonenumbers
 except ImportError:
     phonenumbers = None
 
-from trytond.exceptions import UserError
-from trytond.model.exceptions import AccessError
-from trytond.modules.party.party import IDENTIFIER_TYPES
-from trytond.pool import Pool
+import trytond.tests.test_tryton
 from trytond.tests.test_tryton import ModuleTestCase, with_transaction
+from trytond.tests.test_tryton import doctest_teardown
+from trytond.tests.test_tryton import doctest_checker
+from trytond.pool import Pool
+from trytond.exceptions import UserError
 from trytond.transaction import Transaction
 
 
-class PartyCheckEraseMixin:
-
-    @with_transaction()
-    def test_check_erase_party(self):
-        "Test check erase of party"
-        pool = Pool()
-        Erase = pool.get('party.erase', type='wizard')
-        Session = pool.get('ir.session.wizard')
-        party = self.setup_check_erase_party()
-
-        session = Session()
-        session.save()
-
-        Erase(session.id).check_erase(party)
-
-    def setup_check_erase_party(self):
-        pool = Pool()
-        Party = pool.get('party.party')
-
-        party = Party(active=False)
-        party.save()
-        return party
-
-
-class PartyTestCase(PartyCheckEraseMixin, ModuleTestCase):
+class PartyTestCase(ModuleTestCase):
     'Test Party module'
     module = 'party'
 
@@ -102,102 +76,6 @@ class PartyTestCase(PartyCheckEraseMixin, ModuleTestCase):
         self.assertRaises(Exception, Party.write, [party2], {
                 'code': code,
                 })
-
-    @with_transaction()
-    def test_party_autocomplete_eu_vat(self):
-        "Test party autocomplete eu_vat"
-        pool = Pool()
-        Party = pool.get('party.party')
-
-        self.assertEqual(
-            Party.autocomplete('BE500923836'), [{
-                    'id': None,
-                    'name': 'BE0500923836',
-                    'defaults': {
-                        'identifiers': [{
-                                'type': 'eu_vat',
-                                'code': 'BE0500923836',
-                                }],
-                        },
-                    }])
-
-    @with_transaction()
-    def test_party_autocomplete_eu_vat_without_country(self):
-        "Test party autocomplete eu_vat without country"
-        pool = Pool()
-        Party = pool.get('party.party')
-
-        self.assertIn({
-                'id': None,
-                'name': 'BE0500923836',
-                'defaults': {
-                    'identifiers': [{
-                            'type': 'eu_vat',
-                            'code': 'BE0500923836',
-                            }],
-                    },
-                },
-            Party.autocomplete('500923836'))
-
-    @with_transaction()
-    def test_party_autocomplete_be_vat(self):
-        "Test party autocomplete be_vat"
-        pool = Pool()
-        Party = pool.get('party.party')
-        Configuration = pool.get('party.configuration')
-
-        configuration = Configuration(1)
-        configuration.identifier_types = ['be_vat']
-        configuration.save()
-
-        self.assertEqual(
-            Party.autocomplete('BE500923836'), [{
-                    'id': None,
-                    'name': '0500923836',
-                    'defaults': {
-                        'identifiers': [{
-                                'type': 'be_vat',
-                                'code': '0500923836',
-                                }],
-                        },
-                    }])
-
-    @with_transaction()
-    def test_party_default_get_eu_vat(self):
-        "Test party default_get eu_vat"
-        pool = Pool()
-        Party = pool.get('party.party')
-        Country = pool.get('country.country')
-
-        belgium = Country(code='BE', name="Belgium")
-        belgium.save()
-
-        eu_vat = get_cc_module('eu', 'vat')
-        with patch.object(eu_vat, 'check_vies') as check_vies:
-            check_vies.return_value = {
-                'valid': True,
-                'name': "Tryton Foundation",
-                'address': "Street",
-                }
-            with Transaction().set_context(default_identifiers=[{
-                            'type': 'eu_vat',
-                            'code': 'BE0500923836',
-                            }]):
-                self.assertEqual(
-                    Party.default_get(['name', 'addresses', 'identifiers']), {
-                        'name': "Tryton Foundation",
-                        'addresses': [{
-                                'street': "Street",
-                                'country': belgium.id,
-                                'country.': {
-                                    'rec_name': "🇧🇪 Belgium",
-                                    },
-                                }],
-                        'identifiers': [{
-                                'type': 'eu_vat',
-                                'code': 'BE0500923836',
-                                }],
-                        })
 
     @with_transaction()
     def test_address(self):
@@ -311,14 +189,14 @@ class PartyTestCase(PartyCheckEraseMixin, ModuleTestCase):
         address1, address2 = Address.create([{
                     'party': party.id,
                     'sequence': 1,
-                    'postal_code': None,
+                    'zip': None,
                     }, {
                     'party': party.id,
                     'sequence': 2,
-                    'postal_code': '1000',
+                    'zip': '1000',
                     }])
 
-        address = party.address_get(type='postal_code')
+        address = party.address_get(type='zip')
 
         self.assertEqual(address, address2)
 
@@ -381,30 +259,6 @@ class PartyTestCase(PartyCheckEraseMixin, ModuleTestCase):
 
         # Test acceptance of a non-phone value when type is non-phone
         mechanism = create('email', 'name@example.com')
-
-    @with_transaction()
-    def test_set_contact_mechanism(self):
-        "Test set_contact_mechanism"
-        pool = Pool()
-        Party = pool.get('party.party')
-
-        party = Party(email='test@example.com')
-        party.save()
-
-        self.assertEqual(party.email, 'test@example.com')
-
-    @with_transaction()
-    def test_set_contact_mechanism_with_value(self):
-        "Test set_contact_mechanism"
-        pool = Pool()
-        Party = pool.get('party.party')
-
-        party = Party(email='foo@example.com')
-        party.save()
-
-        party.email = 'bar@example.com'
-        with self.assertRaises(AccessError):
-            party.save()
 
     @with_transaction()
     def test_contact_mechanism_get_no_usage(self):
@@ -547,35 +401,23 @@ class PartyTestCase(PartyCheckEraseMixin, ModuleTestCase):
 
         self.assertEqual(contact, contact2)
 
-    @with_transaction()
-    def test_tax_identifier_types(self):
-        "Ensure tax identifier types are in identifier types"
-        pool = Pool()
-        Party = pool.get('party.party')
-        self.assertFalse(
-            set(Party.tax_identifier_types())
-            - set(dict(IDENTIFIER_TYPES).keys()))
 
-    @with_transaction()
-    def test_party_distance(self):
-        "Test party distance"
-        pool = Pool()
-        Party = pool.get('party.party')
-
-        A, B, = Party.create([{
-                    'name': 'A',
-                    }, {
-                    'name': 'B',
-                    }])
-
-        parties = Party.search([])
-        self.assertEqual([p.distance for p in parties], [None] * 2)
-
-        with Transaction().set_context(related_party=A.id):
-            parties = Party.search([])
-            self.assertEqual(
-                [(p.name, p.distance) for p in parties],
-                [('A', 0), ('B', None)])
-
-
-del ModuleTestCase
+def suite():
+    suite = trytond.tests.test_tryton.suite()
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(PartyTestCase))
+    suite.addTests(doctest.DocFileSuite(
+            'scenario_party_replace.rst',
+            tearDown=doctest_teardown, encoding='utf-8',
+            checker=doctest_checker,
+            optionflags=doctest.REPORT_ONLY_FIRST_FAILURE))
+    suite.addTests(doctest.DocFileSuite(
+            'scenario_party_erase.rst',
+            tearDown=doctest_teardown, encoding='utf-8',
+            checker=doctest_checker,
+            optionflags=doctest.REPORT_ONLY_FIRST_FAILURE))
+    suite.addTests(doctest.DocFileSuite(
+            'scenario_party_phone_number.rst',
+            tearDown=doctest_teardown, encoding='utf-8',
+            checker=doctest_checker,
+            optionflags=doctest.REPORT_ONLY_FIRST_FAILURE))
+    return suite
